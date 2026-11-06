@@ -60,6 +60,7 @@ Deno.serve(async (req) => {
         return json({ ...result, provider: p.name });
       } catch (e) {
         errors.push(`${p.name}: ${e instanceof Error ? e.message : String(e)}`);
+        console.error(JSON.stringify({ ev: "ocr_provider_failed", provider: p.name, error: errors[errors.length - 1] }));
       }
     }
     const msg = errors.join(" | ");

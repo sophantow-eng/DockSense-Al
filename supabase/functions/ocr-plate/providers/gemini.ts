@@ -29,20 +29,27 @@ ${COMMON}`;
 
 let cachedModel: string | null = null;
 
+// ลดเวลา "คิด" ของโมเดล (อ่านป้ายไม่ต้องใช้การให้เหตุผลยาวๆ) — โมเดลแต่ละตระกูลใช้พารามิเตอร์ต่างกัน
+// ลองตามลำดับ: thinkingLevel (ตระกูล 3.x) → thinkingBudget (2.5) → ไม่ส่ง; ถ้าโมเดลปฏิเสธจะถอยไปแบบถัดไปเองแล้วจำไว้
+const THINK_MODES: (Record<string, unknown> | null)[] = [{ thinkingLevel: "minimal" }, { thinkingBudget: 0 }, null];
+let thinkIdx = 0;
+
 type Call = { ok: true; text: string; model: string } | { ok: false; status: number; msg: string };
 
 async function call(key: string, model: string, prompt: string, img: string, mt: string): Promise<Call> {
   let last: Call = { ok: false, status: 0, msg: "no attempt" };
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const used = thinkIdx; // โหมดที่คำขอนี้ใช้ (สองรอบอ่านขนานกัน จึงต้องจำไว้เพื่อไม่ให้ปรับซ้อนกัน)
     try {
+      const think = THINK_MODES[used];
       const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-goog-api-key": key },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ inline_data: { mime_type: mt, data: img } }, { text: prompt }] }],
-          generationConfig: { temperature: 0, responseMimeType: "application/json" },
+          generationConfig: { temperature: 0, responseMimeType: "application/json", ...(think ? { thinkingConfig: think } : {}) },
         }),
-        signal: AbortSignal.timeout(25_000),
+        signal: AbortSignal.timeout(20_000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -55,6 +62,11 @@ async function call(key: string, model: string, prompt: string, img: string, mt:
       }
     } catch (e) {
       last = { ok: false, status: 0, msg: e instanceof Error ? e.message : String(e) };
+    }
+    // โมเดลไม่รองรับพารามิเตอร์ thinking → ถอยไปแบบถัดไปแล้วลองใหม่ทันที (ไม่นับเป็นความพยายาม)
+    if (last.status === 400 && /think/i.test(last.msg)) {
+      if (thinkIdx === used && thinkIdx < THINK_MODES.length - 1) thinkIdx++;
+      if (thinkIdx !== used) { attempt--; continue; }
     }
     // ลองซ้ำเฉพาะปัญหาชั่วคราว
     if (![0, 429, 500, 502, 503, 504].includes(last.status)) break;
@@ -130,13 +142,21 @@ export const geminiProvider: OcrProvider = {
     const key = Deno.env.get("GEMINI_API_KEY");
     if (!key) throw new Error("API_KEY_MISSING: GEMINI_API_KEY is not set in Edge Function secrets");
 
-    const [ra, rb] = await Promise.allSettled([
-      generate(key, PROMPT_A, imageBase64, mediaType),
-      generate(key, PROMPT_B, imageBase64, mediaType),
-    ]);
+    const t0 = Date.now();
+    const timed = (p: string) => generate(key, p, imageBase64, mediaType).then((v) => ({ ...v, ms: Date.now() - t0 }));
+    const [ra, rb] = await Promise.allSettled([timed(PROMPT_A), timed(PROMPT_B)]);
     const reads: { r: Raw; model: string }[] = [];
-    if (ra.status === "fulfilled") { try { reads.push({ r: parse(ra.value.text, false), model: ra.value.model }); } catch { /* ข้ามผลที่ parse ไม่ได้ */ } }
-    if (rb.status === "fulfilled") { try { reads.push({ r: parse(rb.value.text, true), model: rb.value.model }); } catch { /* ข้ามผลที่ parse ไม่ได้ */ } }
+    const dbg: Record<string, unknown> = { ev: "ocr", total_ms: Date.now() - t0, think: JSON.stringify(THINK_MODES[thinkIdx]) };
+    for (const [tag, x, isB] of [["A", ra, false], ["B", rb, true]] as const) {
+      if (x.status === "fulfilled") {
+        try {
+          const r = parse(x.value.text, isB);
+          reads.push({ r, model: x.value.model });
+          dbg[tag] = { ms: x.value.ms, model: x.value.model, plate: r.plate, conf: r.confidence, found: r.found, province: r.province };
+        } catch (e) { dbg[tag] = { ms: x.value.ms, parse_error: e instanceof Error ? e.message : String(e), raw: x.value.text.slice(0, 200) }; }
+      } else dbg[tag] = { error: x.reason instanceof Error ? x.reason.message : String(x.reason) };
+    }
+    console.log(JSON.stringify(dbg)); // ดูได้ที่ Supabase → Edge Functions → ocr-plate → Logs
     if (!reads.length) {
       const err = ra.status === "rejected" ? ra.reason : rb.status === "rejected" ? rb.reason : new Error("OCR returned no JSON");
       throw err instanceof Error ? err : new Error(String(err));
