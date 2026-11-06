@@ -130,13 +130,22 @@ const retake = () => { show("pick"); startCam(); }; $("#cRetake").onclick = reta
 /* ---------- OCR ---------- */
 async function runOcr() {
   const st = $("#ocrState"); st.innerHTML = '<div class="row" style="justify-content:flex-start"><span class="spin dk" style="flex:none"></span><div><b>AI กำลังอ่านป้ายทะเบียน...</b><div class="muted">ใช้เวลาประมาณ 2-5 วินาที</div></div></div>';
-  $("#rSave").disabled = true;
+  $("#rSave").disabled = true; $("#fPlate").style.borderColor = "";
   try {
     const x = await DS.readPlate(blob); ocrRes = x; $("#fPlate").value = x.plate || ""; $("#fProv").value = x.province || ""; $("#fType").value = DS.VEHICLE_TYPES.includes(x.vehicle_type) ? x.vehicle_type : "";
     const c = x.confidence != null ? Math.round(x.confidence * 100) : null;
-    st.innerHTML = x.found ? `✅ AI อ่านได้ — ตรวจสอบและแก้ไขได้ก่อนบันทึก ${c != null ? `<span class="badge ${c >= 85 ? "ok" : c >= 60 ? "warn" : "bad"}">ความมั่นใจ ${c}%</span>` : ""}` : "⚠️ AI ไม่พบป้ายทะเบียนในภาพ กรุณากรอกเองหรือถ่ายใหม่";
+    const badge = c != null ? `<span class="badge ${c >= 85 ? "ok" : c >= 60 ? "warn" : "bad"}">ความมั่นใจ ${c}%</span>` : "";
+    if (!x.found) st.innerHTML = "⚠️ AI ไม่พบป้ายทะเบียนในภาพ กรุณากรอกเองหรือถ่ายใหม่";
+    else if (x.needs_review) {
+      // AI ไม่ชัวร์ (อ่านสองรอบไม่ตรงกัน / รูปแบบป้ายผิดปกติ) → ให้เทียบกับภาพป้ายก่อนบันทึก
+      const alts = (x.alternatives || []).filter((a) => a && a !== x.plate);
+      st.innerHTML = `<b style="color:var(--danger)">⚠️ AI ยังไม่ชัวร์ — กรุณาเทียบกับภาพป้ายแล้วแก้ให้ถูกก่อนบันทึก</b> ${badge}` +
+        (alts.length ? `<div class="muted" style="margin:8px 0 4px">AI อ่านได้อีกแบบ — แตะเพื่อใช้แทน:</div><div class="row" style="justify-content:flex-start;flex-wrap:wrap;gap:8px">${alts.map((a) => `<button type="button" class="ghost alt" data-v="${esc(a)}">${esc(a)}</button>`).join("")}</div>` : "");
+      st.querySelectorAll(".alt").forEach((b) => (b.onclick = () => { $("#fPlate").value = b.dataset.v; DS.toast("เปลี่ยนเป็น " + b.dataset.v, "info"); }));
+      $("#fPlate").style.borderColor = "var(--danger)";
+    } else st.innerHTML = `✅ AI อ่านได้${x.provider === "gemini" ? " (อ่านยืนยัน 2 รอบตรงกัน)" : ""} — ตรวจสอบและแก้ไขได้ก่อนบันทึก ${badge}`;
   } catch (e) {
-    const hint = e.code === "API_KEY_MISSING" ? "ยังไม่ได้ตั้งค่า API Key ของ OCR ที่ฝั่งเซิร์ฟเวอร์" : e.code === "NOT_DEPLOYED" ? "ยังไม่ได้ deploy Edge Function ocr-plate (ดู README.md)" : e.message;
+    const hint = e.code === "API_KEY_MISSING" ? "ยังไม่ได้ตั้งค่า API Key ของ OCR ที่ฝั่งเซิร์ฟเวอร์" : e.code === "API_KEY_INVALID" ? "API Key ของ OCR ใช้ไม่ได้ (ผิดหรือหมดอายุ) — ตรวจสอบใน Supabase secrets" : e.code === "NOT_DEPLOYED" ? "ยังไม่ได้ deploy Edge Function ocr-plate (ดู README.md)" : e.message;
     st.innerHTML = `<b style="color:var(--danger)">⚠️ อ่านทะเบียนอัตโนมัติไม่สำเร็จ</b><p class="muted">${esc(hint)}<br>กรอกเลขทะเบียนเองด้านล่างเพื่อบันทึกต่อได้</p><button class="ghost" id="retryOcr">ลองอ่านอีกครั้ง</button>`;
     $("#retryOcr").onclick = runOcr;
   }

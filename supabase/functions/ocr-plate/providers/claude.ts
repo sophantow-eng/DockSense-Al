@@ -11,6 +11,7 @@ Do not guess characters you cannot see; lower the confidence instead.`;
 
 export const claudeProvider: OcrProvider = {
   name: "claude",
+  keyName: "ANTHROPIC_API_KEY",
   isConfigured: () => !!Deno.env.get("ANTHROPIC_API_KEY"),
   async read(imageBase64, mediaType): Promise<OcrResult> {
     const key = Deno.env.get("ANTHROPIC_API_KEY");
