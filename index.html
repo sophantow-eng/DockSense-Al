@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d9488">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<title>DockSense AI</title>
+<script>
+(function(){function show(m){var d=document.getElementById("ds-err");if(!d){d=document.createElement("div");d.id="ds-err";d.style.cssText="position:fixed;left:0;right:0;top:0;z-index:999;background:#dc2626;color:#fff;padding:10px 14px;font:14px/1.4 sans-serif;white-space:pre-wrap";(document.body||document.documentElement).appendChild(d)}d.textContent+=m+"\n"}
+window.addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href))show("โหลดไฟล์ไม่สำเร็จ: "+(t.src||t.href));else show("JS error: "+e.message)},true);
+window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reason&&e.reason.message)||e.reason))});})();
+</script>
+</head>
+<body>
+<!-- LOGIN -->
+<div id="login" class="wrap hide" style="max-width:380px;padding-top:12vh">
+  <form id="loginForm" class="card">
+    <div style="text-align:center;margin-bottom:10px"><span class="logo" style="width:48px;height:48px;border-radius:14px"></span><h1 style="margin:8px 0 0">DockSense AI</h1><div class="muted">ระบบบันทึกทะเบียนรถเข้าพื้นที่</div></div>
+    <div id="nameWrap" class="hide"><label>ชื่อ-นามสกุล</label><input id="lname"></div>
+    <label>อีเมล</label><input id="lemail" type="email" autocomplete="email" required>
+    <label>รหัสผ่าน (อย่างน้อย 6 ตัว)</label><input id="lpass" type="password" minlength="6" autocomplete="current-password" required>
+    <div id="lerr" class="badge bad hide" style="display:block;margin-top:10px;border-radius:10px;padding:8px"></div>
+    <button id="lbtn" style="width:100%;margin-top:14px">เข้าสู่ระบบ</button>
+    <p style="text-align:center;margin:12px 0 0"><a href="#" id="lmode">ยังไม่มีบัญชี? สมัครสมาชิก</a></p>
+    <p class="muted hide" id="lnote" style="text-align:center">ผู้สมัครคนแรกเป็นผู้ดูแลระบบ คนถัดไปเป็นผู้ชม และผู้ดูแลปรับสิทธิ์ได้ภายหลัง</p>
+  </form>
+</div>
+
+<!-- APP -->
+<div id="app" class="hide">
+  <header class="top"><div class="brand"><span class="logo"></span>DockSense AI</div>
+    <div class="row" style="flex:none"><button class="ghost" id="themeBtn" aria-label="สลับธีม">◐</button><button class="ghost" id="outBtn">ออก</button></div></header>
+  <main class="wrap">
+    <section id="t-home"><h1>ภาพรวม</h1><div id="home"></div></section>
+    <section id="t-history" class="hide">
+      <div class="row sp"><h1 style="margin:0">ประวัติทะเบียนรถ</h1><div class="row" style="flex:none"><button class="ghost" id="fToggle">กรอง</button><button class="ghost" id="csvBtn">CSV</button></div></div>
+      <div id="filters" class="card hide" style="margin-top:12px">
+        <div class="grid g2">
+          <div><label>เลขทะเบียน</label><input id="fp" placeholder="1กก1234"></div>
+          <div><label>จังหวัด</label><input id="fpv" list="provs"></div>
+          <div><label>ตั้งแต่วันที่</label><input id="ff" type="date"></div>
+          <div><label>ถึงวันที่</label><input id="ft" type="date"></div>
+          <div><label>เดือน</label><select id="fm"><option value="">ทั้งหมด</option></select></div>
+          <div><label>ปี (ค.ศ.)</label><select id="fy"><option value="">ทั้งหมด</option></select></div>
+        </div>
+        <button class="ghost" id="fclear" style="margin-top:10px;width:100%">ล้างตัวกรอง</button>
+      </div>
+      <div class="muted" id="hcount" style="margin:10px 0"></div><div id="hlist"></div>
+      <button class="ghost hide" id="more" style="width:100%">โหลดเพิ่ม</button>
+    </section>
+    <section id="t-search" class="hide"><h1>ค้นหาทะเบียน</h1><input id="sq" placeholder="พิมพ์เลขทะเบียน เช่น 1กก1234" style="font-size:17px"><div id="slist" style="margin-top:12px"></div></section>
+    <section id="t-set" class="hide"><h1>ตั้งค่าระบบ</h1><div id="settings"></div></section>
+  </main>
+  <a href="scan.html" id="fab" class="btn fab hide" aria-label="บันทึกทะเบียนรถ">📷</a>
+  <nav class="tabs">
+    <button data-t="home" class="on"><span class="ico">▦</span>ภาพรวม</button>
+    <button data-t="history"><span class="ico">☰</span>ประวัติ</button>
+    <button data-t="search"><span class="ico">⌕</span>ค้นหา</button>
+    <button data-t="set"><span class="ico">⚙</span>ตั้งค่า</button>
+  </nav>
+</div>
+<datalist id="provs"></datalist>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+const $ = (s) => document.querySelector(s), esc = DS.esc, db = DS.db;
+let me = null, tab = "home", rows = [], total = 0, loadingMore = false;
+const PAGE = 20;
+const MONTHS = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+const spin = '<div class="sk"></div><div class="sk"></div><div class="sk"></div>';
+const errBox = (m, retry) => `<div class="empty">⚠️ เกิดข้อผิดพลาด<br><span class="muted">${esc(m)}</span>${retry ? `<br><br><button class="ghost" onclick="${retry}">ลองใหม่</button>` : ""}</div>`;
+
+/* ---------- login ---------- */
+let mode = "in";
+$("#lmode").onclick = (e) => { e.preventDefault(); mode = mode === "in" ? "up" : "in";
+  $("#nameWrap").classList.toggle("hide", mode === "in"); $("#lnote").classList.toggle("hide", mode === "in");
+  $("#lbtn").textContent = mode === "in" ? "เข้าสู่ระบบ" : "สมัครสมาชิก"; $("#lmode").textContent = mode === "in" ? "ยังไม่มีบัญชี? สมัครสมาชิก" : "มีบัญชีแล้ว? เข้าสู่ระบบ"; };
+$("#loginForm").onsubmit = async (e) => {
+  e.preventDefault(); const b = $("#lbtn"); b.disabled = true; $("#lerr").classList.add("hide");
+  try {
+    const email = $("#lemail").value.trim(), password = $("#lpass").value;
+    if (mode === "in") { const { error } = await db.auth.signInWithPassword({ email, password }); if (error) throw error; }
+    else { const { data, error } = await db.auth.signUp({ email, password, options: { data: { full_name: $("#lname").value } } }); if (error) throw error;
+      if (!data.session) { DS.toast("สมัครสำเร็จ กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ", "info"); $("#lmode").click(); b.disabled = false; return; } }
+    boot();
+  } catch (x) { const el = $("#lerr"); el.textContent = /invalid login/i.test(x.message) ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง" : x.message; el.classList.remove("hide"); }
+  b.disabled = false;
+};
+$("#outBtn").onclick = async () => { await db.auth.signOut(); location.reload(); };
+$("#themeBtn").onclick = DS.toggleTheme;
+
+/* ---------- boot / tabs ---------- */
+async function boot() {
+  const a = await DS.requireAuth();
+  if (!a) { $("#login").classList.remove("hide"); $("#app").classList.add("hide"); return; }
+  if (!a.profile) { $("#app").classList.add("hide"); $("#login").classList.remove("hide"); $("#lerr").textContent = "ไม่พบโปรไฟล์ผู้ใช้ กรุณาออกจากระบบแล้วเข้าใหม่"; $("#lerr").classList.remove("hide"); await db.auth.signOut(); return; }
+  me = a.profile; $("#login").classList.add("hide"); $("#app").classList.remove("hide");
+  $("#fab").classList.toggle("hide", !DS.can(me, "write"));
+  $("#provs").innerHTML = DS.PROVINCES.map((p) => `<option value="${p}">`).join("");
+  $("#fm").innerHTML += MONTHS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+  const y = new Date().getFullYear(); $("#fy").innerHTML += [0,1,2,3,4,5].map((i) => `<option>${y - i}</option>`).join("");
+  go("home");
+  let t; db.channel("rt").on("postgres_changes", { event: "*", schema: "public", table: "vehicle_logs" }, () => { clearTimeout(t); t = setTimeout(() => reload(), 400); }).subscribe();
+}
+document.querySelectorAll("nav.tabs button").forEach((b) => (b.onclick = () => go(b.dataset.t)));
+function go(t) {
+  tab = t; document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+  ["home", "history", "search", "set"].forEach((x) => $("#t-" + x).classList.toggle("hide", x !== t)); reload();
+}
+function reload() { ({ home: loadHome, history: () => loadHistory(true), search: loadSearch, set: loadSettings })[tab](); }
+
+/* ---------- home ---------- */
+function bars(data, color) {
+  const max = Math.max(1, ...data.map((d) => d.count)), step = Math.ceil(data.length / 6) || 1;
+  return `<div class="bars">${data.map((d) => `<div class="bar" title="${esc(d.label)}: ${d.count} คัน"><i style="height:${(d.count / max) * 100}%;background:${color}"></i></div>`).join("")}</div><div class="axis">${data.map((d, i) => `<span>${i % step === 0 ? esc(d.label) : ""}</span>`).join("")}</div>`;
+}
+async function loadHome() {
+  if (!$("#home").innerHTML) $("#home").innerHTML = spin;
+  const [s, r] = await Promise.all([db.rpc("dashboard_stats"), db.from("vehicle_logs").select("*").order("capture_at", { ascending: false }).limit(8)]);
+  if (s.error || r.error) { $("#home").innerHTML = errBox((s.error || r.error).message, "loadHome()"); return; }
+  const d = s.data, n = (v) => Number(v).toLocaleString("th-TH");
+  const st = [["รถเข้าวันนี้", d.today_total], ["ทะเบียนไม่ซ้ำวันนี้", d.today_unique], ["เดือนนี้", d.month_total], ["ปีนี้", d.year_total], ["รายการทั้งหมด", d.all_total]];
+  $("#home").innerHTML = `<div class="grid g5">${st.map(([l, v]) => `<div class="card stat" style="margin:0"><b>${n(v)}</b><span class="muted">${l}</span></div>`).join("")}</div>
+  <div class="card" style="margin-top:12px"><h3>จำนวนรถรายวัน (30 วัน)</h3>${bars(d.daily, "#14b8a6")}</div>
+  <div class="card"><h3>รายเดือน (12 เดือน)</h3>${bars(d.monthly, "#6366f1")}</div>
+  <div class="card"><h3>สถิติรายปี</h3>${d.yearly.length ? bars(d.yearly, "#f59e0b") : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>
+  <div class="card"><h3>🟢 Recent Activity</h3>${r.data.length ? r.data.map(itemHtml).join("") : '<div class="empty">ยังไม่มีรายการ เริ่มสแกนทะเบียนคันแรกได้เลย</div>'}</div>`;
+  bindItems($("#home"), r.data);
+}
+function itemHtml(l) {
+  return `<div class="item" data-id="${l.id}" style="padding:8px 0;border-top:1px solid var(--line)">${DS.thumb(l.image_path)}
+  <div style="flex:1;min-width:0"><span class="plate">${esc(l.plate_number)}</span><div class="muted">${esc(l.province || "-")} · ${esc(l.vehicle_type || "")}</div><div class="muted">${DS.fmt.ago(l.capture_at)} · ${DS.fmt.date(l.capture_at)} ${DS.fmt.time(l.capture_at)}</div></div></div>`;
+}
+function bindItems(root, list) { DS.hydrateImages(root); root.querySelectorAll(".item").forEach((el) => (el.onclick = () => showDetail(list.find((x) => x.id === el.dataset.id)))); }
+
+/* ---------- detail / edit / delete ---------- */
+async function showDetail(log, norm) {
+  const m = DS.modal("รายละเอียดทะเบียน", spin), body = m.querySelector(".sb"), n = log ? log.plate_norm : norm;
+  const { data: hist, error } = await db.from("vehicle_logs").select("*").eq("plate_norm", n).order("capture_at", { ascending: false }).limit(200);
+  if (error) { body.innerHTML = errBox(error.message); return; }
+  const head = log || hist[0]; let img = "";
+  if (log && log.image_path) { try { img = `<a href="${await DS.signedUrl(log.image_path)}" target="_blank"><img class="pv" src="${await DS.signedUrl(log.image_path)}" alt="ภาพทะเบียน"></a>`; } catch (e) {} }
+  const conf = log && log.ocr_confidence != null ? Math.round(log.ocr_confidence * 100) : null;
+  body.innerHTML = `<div class="row" style="flex-wrap:wrap"><span class="plate" style="flex:none">${esc(head.plate_number)}</span>${conf != null ? `<span class="badge ${conf >= 85 ? "ok" : conf >= 60 ? "warn" : "bad"}" style="flex:none">ความมั่นใจ ${conf}%</span>` : ""}</div>
+  ${img ? `<div style="margin:12px 0">${img}</div>` : ""}
+  ${log ? `<div class="grid g2"><div><label>วันและเวลาที่ตรวจพบ</label>${DS.fmt.dateTime(log.capture_at)}</div><div><label>จังหวัด</label>${esc(log.province || "-")}</div><div><label>ประเภทรถ</label>${esc(log.vehicle_type || "-")}</div><div><label>หมายเหตุ</label>${esc(log.note || "-")}</div></div>` : ""}
+  <div class="card" style="margin:12px 0"><b>ตรวจพบทั้งหมด ${hist.length} ครั้ง</b> · ล่าสุด ${DS.fmt.dateTime(hist[0].capture_at)}</div>
+  <b>ประวัติการตรวจพบ</b><div style="margin-top:6px">${hist.map((h) => `<div class="item" style="padding:6px 0;border-top:1px solid var(--line);cursor:default">${DS.thumb(h.image_path)}<div style="flex:1">${DS.fmt.dateTime(h.capture_at)}<div class="muted">${esc(h.note || "")}</div></div></div>`).join("")}</div>
+  ${log ? `<div class="row" style="margin-top:14px">${DS.can(me, "write") ? '<button class="ghost" id="dEdit">แก้ไข</button>' : ""}${DS.can(me, "delete") ? '<button class="danger" id="dDel">ลบ</button>' : ""}</div>` : ""}`;
+  DS.hydrateImages(body);
+  if ($("#dEdit")) $("#dEdit").onclick = () => { m.remove(); editLog(log); };
+  if ($("#dDel")) $("#dDel").onclick = () => { m.remove(); delLog(log); };
+}
+function editLog(l) {
+  const m = DS.modal("แก้ไขข้อมูลทะเบียน", `<label>เลขทะเบียน</label><input id="e1" value="${esc(l.plate_number)}"><label>จังหวัด</label><input id="e2" list="provs" value="${esc(l.province || "")}">
+  <label>ประเภทรถ</label><select id="e3"><option value="">ไม่ระบุ</option>${DS.VEHICLE_TYPES.map((t) => `<option ${t === l.vehicle_type ? "selected" : ""}>${t}</option>`).join("")}</select>
+  <label>หมายเหตุ</label><textarea id="e4" rows="2">${esc(l.note || "")}</textarea><p class="muted">วันและเวลาที่ตรวจพบแก้ไขไม่ได้ เพื่อความถูกต้องของประวัติ</p>
+  <div class="row"><button class="ghost" id="e0">ยกเลิก</button><button id="es">บันทึก</button></div>`);
+  m.querySelector("#e0").onclick = () => m.remove();
+  m.querySelector("#es").onclick = async (ev) => {
+    const plate = m.querySelector("#e1").value.trim(); if (!plate) return DS.toast("กรุณากรอกเลขทะเบียน", "error");
+    ev.target.disabled = true;
+    const { error } = await db.from("vehicle_logs").update({ plate_number: plate, province: m.querySelector("#e2").value.trim() || null, vehicle_type: m.querySelector("#e3").value || null, note: m.querySelector("#e4").value.trim() || null }).eq("id", l.id);
+    if (error) { DS.toast(error.message, "error"); ev.target.disabled = false; } else { DS.toast("บันทึกการแก้ไขแล้ว"); m.remove(); reload(); }
+  };
+}
+function delLog(l) {
+  const m = DS.modal("ยืนยันการลบ", `<p>ต้องการลบรายการทะเบียน <b>${esc(l.plate_number)}</b> ใช่หรือไม่?<br><span class="muted">การลบไม่สามารถย้อนกลับได้</span></p><div class="row"><button class="ghost" id="d0">ยกเลิก</button><button class="danger" id="d1">ลบ</button></div>`);
+  m.querySelector("#d0").onclick = () => m.remove();
+  m.querySelector("#d1").onclick = async (ev) => {
+    ev.target.disabled = true; const { error } = await db.from("vehicle_logs").delete().eq("id", l.id);
+    if (error) { DS.toast(error.message, "error"); ev.target.disabled = false; return; }
+    if (l.image_path) await db.storage.from("plate-images").remove([l.image_path]);
+    DS.toast("ลบรายการแล้ว"); m.remove(); reload();
+  };
+}
+
+/* ---------- history ---------- */
+$("#fToggle").onclick = () => $("#filters").classList.toggle("hide");
+let ft; ["fp", "fpv", "ff", "ft", "fm", "fy"].forEach((id) => ($("#" + id).oninput = () => { clearTimeout(ft); ft = setTimeout(() => loadHistory(true), 350); }));
+$("#fclear").onclick = () => { ["fp", "fpv", "ff", "ft", "fm", "fy"].forEach((id) => ($("#" + id).value = "")); loadHistory(true); };
+function applyF(q) {
+  const v = (id) => $("#" + id).value.trim();
+  if (v("fp")) q = q.ilike("plate_norm", `%${DS.norm(v("fp"))}%`);
+  if (v("fpv")) q = q.ilike("province", `%${v("fpv")}%`);
+  if (v("ff")) q = q.gte("capture_date", v("ff")); if (v("ft")) q = q.lte("capture_date", v("ft"));
+  if (v("fm")) q = q.eq("month", +v("fm")); if (v("fy")) q = q.eq("year", +v("fy"));
+  return q;
+}
+async function loadHistory(reset) {
+  if (reset) { $("#hlist").innerHTML = spin; rows = []; }
+  const { data, count, error } = await applyF(db.from("vehicle_logs").select("*", { count: "exact" }).order("capture_at", { ascending: false }).range(rows.length, rows.length + PAGE - 1));
+  if (error) { $("#hlist").innerHTML = errBox(error.message, "loadHistory(true)"); return; }
+  total = count || 0; rows = reset ? data : rows.concat(data);
+  $("#hcount").textContent = `ทั้งหมด ${total.toLocaleString("th-TH")} รายการ`;
+  $("#hlist").innerHTML = rows.length ? `<div class="card" style="padding:4px 14px">${rows.map(itemHtml).join("")}</div>` : '<div class="empty">ไม่พบรายการ<br>ลองเปลี่ยนตัวกรอง หรือเริ่มสแกนทะเบียน</div>';
+  bindItems($("#hlist"), rows); $("#more").classList.toggle("hide", rows.length >= total); $("#more").textContent = `โหลดเพิ่ม (${rows.length}/${total})`;
+}
+$("#more").onclick = async (e) => { e.target.disabled = true; await loadHistory(false); e.target.disabled = false; };
+$("#csvBtn").onclick = async (e) => {
+  e.target.disabled = true;
+  try {
+    const all = [];
+    for (let o = 0; ; o += 1000) { const { data, error } = await applyF(db.from("vehicle_logs").select("*").order("capture_at", { ascending: false }).range(o, o + 999)); if (error) throw error; all.push(...data); if (data.length < 1000) break; }
+    if (!all.length) return DS.toast("ไม่มีข้อมูลให้ส่งออก", "info");
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = ["เลขทะเบียน,จังหวัด,ประเภทรถ,วันที่,เวลา,หมายเหตุ,รหัสรายการ", ...all.map((l) => [l.plate_number, l.province, l.vehicle_type, DS.fmt.date(l.capture_at), DS.fmt.time(l.capture_at), l.note, l.id].map(q).join(","))].join("\r\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" })); a.download = `docksense-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    DS.toast(`ส่งออก ${all.length} รายการแล้ว (เปิดด้วย Excel ได้)`);
+  } catch (x) { DS.toast(x.message, "error"); } finally { e.target.disabled = false; }
+};
+
+/* ---------- search ---------- */
+let st; $("#sq").oninput = () => { clearTimeout(st); st = setTimeout(loadSearch, 300); };
+async function loadSearch() {
+  $("#slist").innerHTML = spin; const n = DS.norm($("#sq").value);
+  let q = db.from("plate_summary").select("*").order("last_seen", { ascending: false }).limit(50); if (n) q = q.ilike("plate_norm", `%${n}%`);
+  const { data, error } = await q; if (error) { $("#slist").innerHTML = errBox(error.message, "loadSearch()"); return; }
+  $("#slist").innerHTML = data.length ? data.map((r) => `<div class="card item" data-n="${esc(r.plate_norm)}"><span class="plate">${esc(r.plate_number)}</span><div><b>เข้ามา ${r.visit_count} ครั้ง</b><div class="muted">${esc(r.province || "")} ล่าสุด ${DS.fmt.dateTime(r.last_seen)}</div></div></div>`).join("") : '<div class="empty">ไม่พบทะเบียนที่ค้นหา<br>ลองพิมพ์เฉพาะบางส่วนของเลขทะเบียน</div>';
+  $("#slist").querySelectorAll(".item").forEach((el) => (el.onclick = () => showDetail(null, el.dataset.n)));
+}
+
+/* ---------- settings ---------- */
+async function loadSettings() {
+  const roleTh = { admin: "ผู้ดูแลระบบ", staff: "เจ้าหน้าที่", viewer: "ผู้ชม" };
+  $("#settings").innerHTML = `<div class="card"><h3>บัญชีของฉัน</h3>${esc(me.full_name || "")} · ${esc(me.email || "")}<div class="muted">สิทธิ์: ${roleTh[me.role]}</div></div>
+  <div class="card"><h3>การเชื่อมต่อ AI OCR</h3><p class="muted">อ่านป้ายที่ Supabase Edge Function <code>ocr-plate</code> เพื่อไม่ให้ API Key อยู่ในหน้าเว็บ (ดูวิธี deploy ใน README.md)</p><button id="ocrTest">ทดสอบการเชื่อมต่อ</button><div id="ocrRes" style="margin-top:10px"></div></div>
+  <div class="card"><h3>แจ้งเตือน Telegram <span class="badge">เร็วๆ นี้</span></h3><p class="muted">ฐานข้อมูลเตรียมตารางไว้แล้ว จะแจ้งเตือนเมื่อรถทะเบียนที่ติดตามเข้าบริษัท</p></div>
+  <div class="card"><h3>ติดตั้งเป็นแอป</h3><p class="muted">Android: Chrome → เมนู ⋮ → "ติดตั้งแอป" · iPhone: Safari → แชร์ → "เพิ่มไปยังหน้าจอโฮม"</p></div><div id="users"></div>`;
+  $("#ocrTest").onclick = async (e) => {
+    e.target.disabled = true; const out = $("#ocrRes");
+    try { const p = await DS.pingOcr(); out.innerHTML = `<span class="badge ok">✓ เชื่อมต่อสำเร็จ (ผู้ให้บริการ: ${esc(p)})</span>`; }
+    catch (x) { out.innerHTML = `<span class="badge bad">✗ ${x.code === "API_KEY_MISSING" ? "ยังไม่ได้ตั้งค่า ANTHROPIC_API_KEY" : x.code === "NOT_DEPLOYED" ? "ยังไม่ได้ deploy Edge Function ocr-plate" : esc(x.message)}</span>`; }
+    e.target.disabled = false;
+  };
+  if (DS.can(me, "admin")) {
+    const { data, error } = await db.from("profiles").select("*").order("created_at");
+    if (error) return;
+    $("#users").innerHTML = `<div class="card"><h3>จัดการผู้ใช้งานและสิทธิ์</h3>${data.map((u) => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><div style="min-width:0"><b>${esc(u.full_name || "")}</b><div class="muted">${esc(u.email || "")}</div></div>
+      <select data-u="${u.id}" ${u.id === me.id ? "disabled" : ""}>${["admin", "staff", "viewer"].map((r) => `<option value="${r}" ${r === u.role ? "selected" : ""}>${roleTh[r]}</option>`).join("")}</select></div>`).join("")}</div>`;
+    $("#users").querySelectorAll("select").forEach((s) => (s.onchange = async () => { const { error } = await db.from("profiles").update({ role: s.value }).eq("id", s.dataset.u); error ? DS.toast(error.message, "error") : DS.toast("เปลี่ยนสิทธิ์แล้ว"); }));
+  }
+}
+boot();
+</script>
+<script>
+setTimeout(function(){
+  var l=document.getElementById("login"),a=document.getElementById("app");
+  if(l&&a&&l.classList.contains("hide")&&a.classList.contains("hide")){
+    var d=document.createElement("div");
+    d.style.cssText="margin:40px 16px;padding:16px;border-radius:14px;background:#fff;color:#111;font:15px/1.6 sans-serif;border:2px solid #dc2626";
+    d.innerHTML="<b>หน้าเว็บยังไม่พร้อมใช้งาน</b><br>common.js: "+(typeof DS!=="undefined"?"โหลดแล้ว ✓":"ไม่พบ ✗ (ไฟล์ไม่ได้อัปโหลดหรืออยู่ผิดที่)")+"<br>supabase-js: "+(typeof supabase!=="undefined"?"โหลดแล้ว ✓":"ไม่พบ ✗")+"<br>config.js: "+((window.DS_CONFIG&&window.DS_CONFIG.SUPABASE_KEY)?"โหลดแล้ว ✓":"ไม่พบ ✗");
+    document.body.appendChild(d);
+  }
+},4000);
+</script>
+</body>
+</html>
