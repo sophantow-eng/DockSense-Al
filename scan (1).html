@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d9488">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.co{display:flex;align-items:center;gap:10px;min-width:0}
+.co .lg,.co .ini{width:40px;height:40px;border-radius:10px;flex:none}
+.co .lg{object-fit:contain;background:#fff;border:1px solid var(--line)}
+.co .ini{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700}
+.co .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.wrapsafe{overflow-wrap:anywhere}
+.cand{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;margin-top:8px;cursor:pointer;min-height:48px}
+.cand.on{border-color:#0d9488;box-shadow:0 0 0 2px rgba(13,148,136,.25)}
+.cand input{width:auto;flex:none;margin:0}
+.ds-chk{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.5}
+.ds-chk input{width:22px;height:22px;flex:none;margin:1px 0 0;padding:0}
+.ds-chk span{cursor:pointer}
+</style>
+<title>สแกนทะเบียน · DockSense AI</title>
+<script>
+(function(){function show(m){var d=document.getElementById("ds-err");if(!d){d=document.createElement("div");d.id="ds-err";d.style.cssText="position:fixed;left:0;right:0;top:0;z-index:999;background:#dc2626;color:#fff;padding:10px 14px;font:14px/1.4 sans-serif;white-space:pre-wrap";(document.body||document.documentElement).appendChild(d)}d.textContent+=m+"\n"}
+window.addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href))show("โหลดไฟล์ไม่สำเร็จ: "+(t.src||t.href));else show("JS error: "+e.message)},true);
+window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reason&&e.reason.message)||e.reason))});})();
+</script>
+</head>
+<body style="padding-bottom:20px">
+<header class="top"><a href="index.html" class="btn ghost" style="padding:8px 12px">← กลับ</a><div class="brand"><span class="logo"></span>สแกนทะเบียนรถ</div><button class="ghost" id="themeBtn">◐</button></header>
+<main class="wrap" style="max-width:560px">
+  <div id="loading" class="empty"><span class="spin dk"></span></div>
+  <div id="denied" class="empty hide">🔒 บัญชีนี้ไม่มีสิทธิ์บันทึกทะเบียน<br>ติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เจ้าหน้าที่</div>
+
+  <!-- 1 กล้อง -->
+  <section id="s-pick" class="hide">
+    <div class="cam"><video id="video" playsinline muted></video><div class="frame"></div>
+      <div id="camErr" class="hide" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;text-align:center;padding:24px"></div>
+      <button class="flip" id="flip" aria-label="สลับกล้อง">🔄</button><button class="shutter" id="shoot" aria-label="ถ่ายภาพ">📷</button></div>
+    <p class="muted" style="text-align:center">วางป้ายทะเบียนให้อยู่ในกรอบประ</p>
+    <div class="grid g2">
+      <label class="btn ghost" style="margin:0;color:var(--text);font-size:14px">🖼️ เลือกจากคลังภาพ<input id="gal" type="file" accept="image/*" class="hide"></label>
+      <label class="btn ghost" style="margin:0;color:var(--text);font-size:14px">📱 ใช้กล้องของเครื่อง<input id="nat" type="file" accept="image/*" capture="environment" class="hide"></label>
+    </div>
+  </section>
+
+  <!-- 2 ครอป -->
+  <section id="s-crop" class="hide">
+    <p class="muted">ลากกรอบให้ครอบเฉพาะป้ายทะเบียน เพื่อให้ AI อ่านแม่นยำขึ้น</p>
+    <div style="display:flex;justify-content:center;background:#000;border-radius:14px;padding:8px"><div class="cropbox" id="cbox"><img id="cimg" alt="ภาพต้นฉบับ" draggable="false"><div class="crect" id="crect"><div class="hd" data-m="nw" style="left:-14px;top:-14px"></div><div class="hd" data-m="ne" style="right:-14px;top:-14px"></div><div class="hd" data-m="sw" style="left:-14px;bottom:-14px"></div><div class="hd" data-m="se" style="right:-14px;bottom:-14px"></div></div></div></div>
+    <div class="grid g3" style="margin-top:12px"><button class="ghost" id="cRetake">ถ่ายใหม่</button><button class="ghost" id="cFull">ใช้ภาพเต็ม</button><button id="cOk">ใช้ส่วนที่เลือก</button></div>
+  </section>
+
+  <!-- 3 ตรวจสอบ -->
+  <section id="s-review" class="hide">
+    <img id="pv" class="pv" alt="ภาพป้ายทะเบียน">
+    <div id="ocrState" class="card" style="margin-top:12px"></div>
+    <div class="card">
+      <label>เลขทะเบียน *</label><input id="fPlate" class="platein" placeholder="เช่น 1กก 1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <div class="grid g2"><div><label>จังหวัด</label><input id="fProv" list="provs"></div><div><label>ประเภทรถ</label><select id="fType"></select></div></div>
+      <label>หมายเหตุ</label><input id="fNote">
+      <p class="muted">วันและเวลาบันทึกอัตโนมัติจากเวลาจริงของระบบ (Asia/Bangkok)</p>
+    </div>
+    <div id="matchCard" class="card hide"></div>
+    <div id="regCard" class="card hide">
+      <b id="regTitle">ลงทะเบียนรถคันใหม่</b>
+      <label>บริษัทขนส่ง</label><select id="fCompany"><option value="">ไม่ระบุบริษัท</option></select>
+      <div id="newCoWrap" class="hide"><label>ชื่อบริษัทใหม่</label><input id="fNewCo" maxlength="80" autocomplete="off"></div>
+    </div>
+    <div id="verWrap" class="card hide"><div class="ds-chk"><input type="checkbox" id="fVerified"><span id="verTxt">ฉันตรวจสอบแล้วว่าเลขทะเบียนและจังหวัดตรงกับภาพ</span></div></div>
+    <div class="actbar"><button class="ghost" id="rRetake">ถ่ายใหม่</button><button id="rSave">ยืนยันและบันทึก</button></div>
+  </section>
+
+  <!-- 4 สำเร็จ -->
+  <section id="s-done" class="hide card" style="text-align:center"><div id="dIcon" style="font-size:54px">✅</div><h1 id="dPlate" style="margin:4px 0"></h1><div id="dInfo"></div><p id="dRep" class="badge" style="display:block;padding:10px;border-radius:12px;margin:12px 0"></p>
+    <div class="grid g2"><a class="btn ghost" href="index.html">กลับหน้าหลัก</a><button id="dNext">สแกนคันถัดไป</button></div></section>
+</main>
+<datalist id="provs"></datalist>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// ค่าโปรเจกต์ Supabase (publishable/anon key เปิดเผยในหน้าเว็บได้ เพราะข้อมูลถูกป้องกันด้วย Login + RLS)
+// ห้ามใส่ service_role key หรือ ANTHROPIC_API_KEY ในไฟล์นี้เด็ดขาด
+window.DS_CONFIG = {
+  SUPABASE_URL: "https://dhqvdbdqhcbymqvhpqop.supabase.co",
+  // Publishable key (เปิดเผยได้) — ดูได้ที่ Supabase → Project Settings → API Keys
+  SUPABASE_KEY: "sb_publishable_sLXbMjD5NWTKmyLB4YqlmQ_He_kA1LK"
+};
+
+</script>
+<script>
+/* DockSense AI — ส่วนที่ใช้ร่วมกัน (index.html + scan.html) */
+(function () {
+  const cfg = window.DS_CONFIG || {};
+  const keyMissing = !cfg.SUPABASE_URL || !cfg.SUPABASE_KEY || /PASTE_/.test(cfg.SUPABASE_KEY);
+  const db = supabase.createClient(cfg.SUPABASE_URL || "https://invalid.supabase.co", cfg.SUPABASE_KEY || "missing", {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
+
+  const TZ = "Asia/Bangkok";
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // ต้องตรงกับคอลัมน์ plate_norm ในฐานข้อมูล: upper(regexp_replace(plate_number, '[\s\-]', '', 'g'))
+  const norm = (s) => String(s ?? "").toUpperCase().replace(/[\s\-]/g, "");
+
+  /* ธีม */
+  const applyTheme = (t) => { if (t === "dark") document.documentElement.setAttribute("data-theme", "dark"); else document.documentElement.removeAttribute("data-theme"); };
+  try {
+    const saved = localStorage.getItem("ds_theme");
+    applyTheme(saved || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  } catch (e) {}
+  const toggleTheme = () => {
+    const t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    applyTheme(t); try { localStorage.setItem("ds_theme", t); } catch (e) {}
+  };
+
+  /* วันเวลา (แสดงตามเวลาไทยเสมอ ปี ค.ศ.) */
+  const mkf = (o) => new Intl.DateTimeFormat("th-TH-u-ca-gregory", { timeZone: TZ, ...o });
+  const fD = mkf({ day: "numeric", month: "short", year: "numeric" }), fT = mkf({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const ok = (v) => v && !isNaN(new Date(v));
+  const fmt = {
+    date: (v) => (ok(v) ? fD.format(new Date(v)) : "-"),
+    time: (v) => (ok(v) ? fT.format(new Date(v)) : "-"),
+    dateTime: (v) => (ok(v) ? fD.format(new Date(v)) + " " + fT.format(new Date(v)) : "-"),
+    ago: (v) => {
+      if (!ok(v)) return "-";
+      const s = Math.max(0, (Date.now() - new Date(v)) / 1000);
+      if (s < 60) return "เมื่อสักครู่";
+      if (s < 3600) return Math.floor(s / 60) + " นาทีที่แล้ว";
+      if (s < 86400) return Math.floor(s / 3600) + " ชั่วโมงที่แล้ว";
+      if (s < 604800) return Math.floor(s / 86400) + " วันที่แล้ว";
+      return fD.format(new Date(v));
+    },
+  };
+
+  /* toast */
+  function toast(msg, type) {
+    let box = document.querySelector(".toasts");
+    if (!box) { box = document.createElement("div"); box.className = "toasts"; document.body.appendChild(box); }
+    const t = document.createElement("div"); t.className = "toast" + (type && type !== "ok" ? " " + type : ""); t.textContent = msg; box.appendChild(t);
+    setTimeout(() => t.remove(), type === "error" ? 5000 : 3000);
+  }
+
+  /* modal: คืน element .modal ที่มี .sb (เนื้อหา) — ปิดด้วย m.remove() */
+  function modal(title, html) {
+    const m = document.createElement("div"); m.className = "modal";
+    m.innerHTML = `<div class="sheet"><div class="sh"><b>${esc(title)}</b><button class="x" aria-label="ปิด">✕</button></div><div class="sb">${html || ""}</div></div>`;
+    m.addEventListener("click", (e) => { if (e.target === m) m.remove(); });
+    m.querySelector(".x").onclick = () => m.remove();
+    document.body.appendChild(m); return m;
+  }
+
+  /* รูปภาพใน bucket private → signed URL (แคชไว้) */
+  const sc = new Map();
+  async function signedUrl(path) {
+    const hit = sc.get(path); if (hit && hit.exp > Date.now()) return hit.url;
+    const { data, error } = await db.storage.from("plate-images").createSignedUrl(path, 3600); if (error) throw error;
+    sc.set(path, { url: data.signedUrl, exp: Date.now() + 3300 * 1000 }); return data.signedUrl;
+  }
+  const thumb = (p) => (p ? `<img class="ph" data-p="${esc(p)}" alt="" loading="lazy">` : '<div class="ph"></div>');
+  function hydrateImages(root) {
+    (root || document).querySelectorAll("img[data-p]").forEach(async (img) => {
+      const p = img.dataset.p; img.removeAttribute("data-p");
+      try { img.src = await signedUrl(p); } catch (e) { img.style.visibility = "hidden"; }
+    });
+  }
+
+  /* สิทธิ์: admin ทำได้ทุกอย่าง · staff บันทึก/แก้ไข · viewer ดูอย่างเดียว (RLS ในฐานข้อมูลบังคับอีกชั้น) */
+  const can = (me, a) => !!me && (a === "read" ? true : a === "write" ? me.role === "admin" || me.role === "staff" : me.role === "admin");
+
+  /* session + โปรไฟล์: คืน null ถ้ายังไม่ล็อกอิน, {session, profile:null} ถ้ายังไม่มีโปรไฟล์ */
+  async function requireAuth() {
+    const { data: { session }, error } = await db.auth.getSession();
+    if (error || !session) return null;
+    const { data: profile, error: pe } = await db.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+    if (pe) console.error("profiles:", pe);
+    return { session, profile: profile || null };
+  }
+
+  /* OCR ผ่าน Edge Function (API key อยู่ฝั่งเซิร์ฟเวอร์เท่านั้น) */
+  async function fnErr(error) {
+    let code = "OCR_FAILED", msg = error.message || "เรียก OCR ไม่สำเร็จ";
+    const ctx = error.context;
+    if (error.name === "FunctionsHttpError" && ctx) {
+      try { const j = await ctx.json(); msg = j.error || j.message || msg; code = j.code || code; } catch (e) {}
+      if (ctx.status === 404) code = "NOT_DEPLOYED";
+      else if (ctx.status === 401) { code = "UNAUTHORIZED"; msg = "เซสชันหมดอายุหรือไม่ได้รับอนุญาต กรุณาเข้าสู่ระบบใหม่"; }
+    } else { code = "NOT_DEPLOYED"; msg = "เชื่อมต่อ Edge Function ไม่ได้ (ยังไม่ได้ deploy หรืออินเทอร์เน็ตมีปัญหา)"; }
+    const e = new Error(msg); e.code = code; return e;
+  }
+  const b64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("อ่านไฟล์ภาพไม่ได้")); r.readAsDataURL(blob); });
+  async function readPlate(blob) {
+    const { data, error } = await db.functions.invoke("ocr-plate", { body: { imageBase64: await b64(blob), mediaType: blob.type || "image/jpeg" } });
+    if (error) throw await fnErr(error); return data;
+  }
+  async function pingOcr() {
+    const { data, error } = await db.functions.invoke("ocr-plate", { body: { ping: true } });
+    if (error) throw await fnErr(error); return data.provider;
+  }
+
+  const VEHICLE_TYPES = ["รถยนต์", "รถกระบะ", "รถบรรทุก", "รถจักรยานยนต์", "รถตู้", "อื่นๆ"];
+  const PROVINCES = ["กรุงเทพมหานคร","กระบี่","กาญจนบุรี","กาฬสินธุ์","กำแพงเพชร","ขอนแก่น","จันทบุรี","ฉะเชิงเทรา","ชลบุรี","ชัยนาท","ชัยภูมิ","ชุมพร","เชียงราย","เชียงใหม่","ตรัง","ตราด","ตาก","นครนายก","นครปฐม","นครพนม","นครราชสีมา","นครศรีธรรมราช","นครสวรรค์","นนทบุรี","นราธิวาส","น่าน","บึงกาฬ","บุรีรัมย์","ปทุมธานี","ประจวบคีรีขันธ์","ปราจีนบุรี","ปัตตานี","พระนครศรีอยุธยา","พะเยา","พังงา","พัทลุง","พิจิตร","พิษณุโลก","เพชรบุรี","เพชรบูรณ์","แพร่","ภูเก็ต","มหาสารคาม","มุกดาหาร","แม่ฮ่องสอน","ยโสธร","ยะลา","ร้อยเอ็ด","ระนอง","ระยอง","ราชบุรี","ลพบุรี","ลำปาง","ลำพูน","เลย","ศรีสะเกษ","สกลนคร","สงขลา","สตูล","สมุทรปราการ","สมุทรสงคราม","สมุทรสาคร","สระแก้ว","สระบุรี","สิงห์บุรี","สุโขทัย","สุพรรณบุรี","สุราษฎร์ธานี","สุรินทร์","หนองคาย","หนองบัวลำภู","อ่างทอง","อำนาจเจริญ","อุดรธานี","อุตรดิตถ์","อุทัยธานี","อุบลราชธานี"];
+
+  window.addEventListener("offline", () => toast("ออฟไลน์อยู่ — ตรวจสอบอินเทอร์เน็ต", "error"));
+  window.addEventListener("online", () => toast("กลับมาออนไลน์แล้ว", "info"));
+
+  window.DS = { db, esc, norm, toggleTheme, fmt, toast, modal, signedUrl, thumb, hydrateImages, can, requireAuth, readPlate, pingOcr, VEHICLE_TYPES, PROVINCES, TZ };
+
+  if (keyMissing) document.addEventListener("DOMContentLoaded", () => {
+    const d = document.createElement("div");
+    d.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:200;background:#dc2626;color:#fff;padding:10px 14px;font-size:14px;text-align:center";
+    d.textContent = "ยังไม่ได้ตั้งค่า SUPABASE_KEY ใน config.js — ล็อกอินและโหลดข้อมูลไม่ได้";
+    document.body.appendChild(d);
+  });
+})();
+
+</script>
+<script>
+const $ = (s) => document.querySelector(s), esc = DS.esc, db = DS.db;
+let me = null, session = null, stream = null, facing = "environment", blob = null, ocrRes = null, rawUrl = "";
+const urls = []; const mk = (b) => { const u = URL.createObjectURL(b); urls.push(u); return u; };
+const show = (id) => ["pick", "crop", "review", "done"].forEach((s) => $("#s-" + s).classList.toggle("hide", s !== id));
+$("#themeBtn").onclick = DS.toggleTheme;
+$("#provs").innerHTML = DS.PROVINCES.map((p) => `<option value="${p}">`).join("");
+$("#fType").innerHTML = '<option value="">ไม่ระบุ</option>' + DS.VEHICLE_TYPES.map((t) => `<option>${t}</option>`).join("");
+
+(async () => {
+  const a = await DS.requireAuth();
+  if (!a || !a.profile) { location.href = "index.html"; return; }
+  me = a.profile; session = a.session; $("#loading").classList.add("hide");
+  if (!DS.can(me, "write")) { $("#denied").classList.remove("hide"); return; }
+  startCam(); show("pick"); loadCompanies();
+})();
+
+/* ---------- กล้อง ---------- */
+function stopCam() { if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; }
+async function startCam() {
+  stopCam(); $("#camErr").classList.add("hide");
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return camErr("เปิดกล้องผ่านหน้าเว็บไม่ได้ (ต้องเปิดผ่าน HTTPS) ใช้ปุ่มด้านล่างแทนได้");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    $("#video").srcObject = stream; await $("#video").play().catch(() => {});
+  } catch (e) { camErr(e.name === "NotAllowedError" ? "ไม่ได้รับอนุญาตให้ใช้กล้อง กรุณาอนุญาตในการตั้งค่าเบราว์เซอร์" : e.name === "NotFoundError" ? "ไม่พบกล้องในอุปกรณ์นี้" : "เปิดกล้องไม่สำเร็จ: " + e.message); }
+}
+function camErr(m) { const el = $("#camErr"); el.textContent = m; el.classList.remove("hide"); }
+addEventListener("pagehide", stopCam);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopCam();
+  else if (!$("#s-pick").classList.contains("hide") && !stream) startCam();
+});
+$("#flip").onclick = () => { facing = facing === "environment" ? "user" : "environment"; startCam(); };
+$("#shoot").onclick = () => {
+  const v = $("#video"); if (!v.videoWidth) return DS.toast("กล้องยังไม่พร้อม", "info");
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0);
+  c.toBlob((b) => b && toCrop(b), "image/jpeg", 0.92);
+};
+["gal", "nat"].forEach((id) => ($("#" + id).onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) toCrop(f); }));
+
+/* ---------- ครอป ---------- */
+let r = { x: 0.1, y: 0.3, w: 0.8, h: 0.4 }, drag = null; const MIN = 0.1, cl = (v, a, b) => Math.min(b, Math.max(a, v));
+function toCrop(b) { stopCam(); rawUrl = mk(b); $("#cimg").src = rawUrl; r = { x: 0.1, y: 0.3, w: 0.8, h: 0.4 }; paint(); show("crop"); }
+function paint() { const s = $("#crect").style; s.left = r.x * 100 + "%"; s.top = r.y * 100 + "%"; s.width = r.w * 100 + "%"; s.height = r.h * 100 + "%"; }
+$("#crect").addEventListener("pointerdown", (e) => { e.stopPropagation(); e.target.setPointerCapture(e.pointerId); drag = { m: e.target.dataset.m || "move", sx: e.clientX, sy: e.clientY, r: { ...r } }; });
+$("#cbox").addEventListener("pointermove", (e) => {
+  if (!drag) return; const b = $("#cbox").getBoundingClientRect(), dx = (e.clientX - drag.sx) / b.width, dy = (e.clientY - drag.sy) / b.height; let { x, y, w, h } = drag.r;
+  if (drag.m === "move") { x = cl(x + dx, 0, 1 - w); y = cl(y + dy, 0, 1 - h); }
+  else {
+    if (drag.m.includes("w")) { const nx = cl(x + dx, 0, x + w - MIN); w += x - nx; x = nx; } else w = cl(w + dx, MIN, 1 - x);
+    if (drag.m.includes("n")) { const ny = cl(y + dy, 0, y + h - MIN); h += y - ny; y = ny; } else h = cl(h + dy, MIN, 1 - y);
+  }
+  r = { x, y, w, h }; paint();
+});
+addEventListener("pointerup", () => (drag = null));
+function doCrop(full) {
+  const i = $("#cimg"), c = full ? { x: 0, y: 0, w: 1, h: 1 } : r, sw = i.naturalWidth * c.w, sh = i.naturalHeight * c.h, k = Math.min(1, 1600 / Math.max(sw, sh));
+  const cv = document.createElement("canvas"); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
+  cv.getContext("2d").drawImage(i, i.naturalWidth * c.x, i.naturalHeight * c.y, sw, sh, 0, 0, cv.width, cv.height);
+  cv.toBlob((b) => { blob = b; $("#pv").src = mk(b); ocrRes = null; ["fPlate", "fProv", "fNote"].forEach((x) => ($("#" + x).value = "")); $("#fType").value = ""; resetMatch(); show("review"); runOcr(); }, "image/jpeg", 0.88);
+}
+$("#cOk").onclick = () => doCrop(false); $("#cFull").onclick = () => doCrop(true);
+const retake = () => { show("pick"); startCam(); }; $("#cRetake").onclick = retake; $("#rRetake").onclick = retake; $("#dNext").onclick = retake;
+
+/* ---------- บริษัท / จับคู่รถ ---------- */
+const NEW_CO = "__new";
+let companies = [], match = null, matchSeq = 0, pick = null, ocrBusy = false, saving = false, mt = null;
+const logoUrl = (p) => db.storage.from("company-logos").getPublicUrl(p).data.publicUrl;
+function coBadge(c) {
+  if (!c) return '<span class="badge warn">ไม่ระบุบริษัท</span>';
+  const col = /^#[0-9a-fA-F]{6}$/.test(c.brand_color || "") ? c.brand_color : "#0d9488";
+  const ch = Array.from(String(c.company_name || "").trim())[0] || "?";
+  const ini = /[\p{L}\p{N}]/u.test(ch) ? esc(ch.toUpperCase()) : "?";
+  const mark = c.logo_url
+    ? `<img class="lg" src="${esc(logoUrl(c.logo_url))}" alt="" onerror="this.outerHTML='<div class=&quot;ini&quot; style=&quot;background:${col}&quot;>${ini}</div>'">`
+    : `<div class="ini" style="background:${col}">${ini}</div>`;
+  return `<div class="co" style="border-left:4px solid ${col};padding-left:8px">${mark}<div class="nm">${esc(c.company_name)}</div></div>`;
+}
+async function loadCompanies() {
+  const { data, error } = await db.from("companies").select("id,company_name,logo_url,brand_color").order("company_name");
+  if (error) { DS.toast("โหลดรายชื่อบริษัทไม่สำเร็จ: " + error.message, "error"); companies = []; } else companies = data;
+  $("#fCompany").innerHTML = '<option value="">ไม่ระบุบริษัท</option>' + companies.map((c) => `<option value="${esc(c.id)}">${esc(c.company_name)}</option>`).join("") + `<option value="${NEW_CO}">➕ เพิ่มบริษัทใหม่…</option>`;
+}
+$("#fCompany").onchange = () => { $("#newCoWrap").classList.toggle("hide", $("#fCompany").value !== NEW_CO); updSave(); };
+$("#fNewCo").oninput = updSave;
+$("#fVerified").onchange = updSave;
+$("#verTxt").onclick = () => { $("#fVerified").checked = !$("#fVerified").checked; updSave(); };
+
+// ผู้ใช้แก้เลขทะเบียน/จังหวัดเองหลัง AI อ่านแล้วหรือไม่ (ถ้าแก้ ถือว่าคนตรวจแล้ว)
+function humanEdited() {
+  if (!ocrRes || !ocrRes.found) return false;
+  return DS.norm($("#fPlate").value) !== DS.norm(ocrRes.plate) || ($("#fProv").value.trim() || "") !== (ocrRes.province || "");
+}
+// ความมั่นใจที่ใช้ตัดสินการจับคู่: ถ้าคนพิมพ์/แก้เอง = null (เชื่อคน) · AI อ่านแต่ไม่ส่งค่ามา = 0.5 (ต้องตรวจสอบ)
+const matchConf = () => (ocrRes && ocrRes.found && !humanEdited() ? (ocrRes.confidence != null ? ocrRes.confidence : 0.5) : null);
+
+function updSave() {
+  let ok = !!$("#fPlate").value.trim() && !ocrBusy && !saving && !!match;
+  if (ok) {
+    if (!$("#verWrap").classList.contains("hide") && !$("#fVerified").checked) ok = false;
+    if (match.state === "verify" && match.reason === "province_mismatch" && !pick) ok = false;
+    if (!$("#regCard").classList.contains("hide") && $("#fCompany").value === NEW_CO && !$("#fNewCo").value.trim()) ok = false;
+  }
+  $("#rSave").disabled = !ok;
+}
+function resetMatch() {
+  clearTimeout(mt); matchSeq++; match = null; pick = null;
+  ["matchCard", "regCard", "verWrap"].forEach((i) => $("#" + i).classList.add("hide"));
+  $("#fCompany").value = ""; $("#newCoWrap").classList.add("hide"); $("#fNewCo").value = ""; $("#fVerified").checked = false; updSave();
+}
+function scheduleMatch() { clearTimeout(mt); match = null; updSave(); mt = setTimeout(runMatch, 450); }
+["fPlate", "fProv"].forEach((id) => { $("#" + id).addEventListener("input", scheduleMatch); $("#" + id).addEventListener("change", scheduleMatch); });
+
+async function runMatch() {
+  const seq = ++matchSeq, plate = $("#fPlate").value.trim(), card = $("#matchCard");
+  match = null; pick = null; updSave();
+  if (!plate) { ["matchCard", "regCard", "verWrap"].forEach((i) => $("#" + i).classList.add("hide")); return; }
+  card.classList.remove("hide"); $("#regCard").classList.add("hide"); $("#verWrap").classList.add("hide");
+  card.innerHTML = '<div class="row" style="justify-content:flex-start"><span class="spin dk" style="flex:none"></span><div class="muted">กำลังตรวจสอบรถในระบบ...</div></div>';
+  const { data, error } = await db.rpc("match_plate", { p_plate: plate, p_province: $("#fProv").value.trim() || null, p_confidence: matchConf() });
+  if (seq !== matchSeq) return; // มีการแก้ไขใหม่แล้ว ทิ้งผลเก่า
+  if (error) {
+    card.innerHTML = `<b style="color:var(--danger)">⚠️ ตรวจสอบรถในระบบไม่สำเร็จ</b><p class="muted wrapsafe">${esc(error.message)}</p><button class="ghost" id="retryMatch">ลองอีกครั้ง</button>`;
+    $("#retryMatch").onclick = runMatch; return;
+  }
+  match = data; renderMatch();
+}
+
+function renderMatch() {
+  const m = match, v = m.vehicle, st = m.stats, card = $("#matchCard");
+  let h = "", reg = false, ver = false, regTitle = "ลงทะเบียนรถคันใหม่"; pick = null;
+  const stat = st ? `<div class="muted">เข้ามาแล้ว ${st.visit_count} ครั้ง · ล่าสุด ${DS.fmt.dateTime(st.last_seen)}</div>` : "";
+  const recent = m.recent_visit ? `<div class="badge warn" style="display:block;margin-top:8px;border-radius:10px;padding:8px;white-space:normal">บันทึกรถคันนี้ไว้เมื่อ ${DS.fmt.dateTime(m.recent_visit.capture_at)} (ภายใน ${m.window_minutes} นาที) จึงจะไม่บันทึกซ้ำ</div>` : "";
+  if (v && (m.state === "known" || m.reason === "low_confidence")) {
+    h = `<b>${m.state === "known" ? "✅ รถที่ลงทะเบียนแล้ว" : "⚠️ ความมั่นใจของ AI ต่ำ ตรวจสอบก่อนบันทึก"}</b><div style="margin-top:8px">${coBadge(m.company)}</div>
+      <div class="muted wrapsafe" style="margin-top:6px">${esc(v.province || "ไม่ระบุจังหวัด")}${v.vehicle_type ? " · " + esc(v.vehicle_type) : ""}</div>${stat}${recent}`;
+    ver = m.state === "verify";
+    if (!m.company) { reg = true; regTitle = "กำหนดบริษัทให้รถคันนี้ (ไม่บังคับ)"; }
+  } else if (m.state === "verify") {
+    h = `<b>⚠️ พบทะเบียนนี้ในระบบ แต่จังหวัดไม่ตรงกัน</b><p class="muted">เลือกว่าเป็นรถคันไหน ระบบจะไม่เลือกให้เอง</p>
+      ${m.candidates.map((c) => `<div class="cand" data-id="${esc(c.id)}"><input type="radio" name="cand" tabindex="-1"><div style="min-width:0"><span class="plate">${esc(c.license_plate)}</span><div class="muted wrapsafe">${esc(c.province || "ไม่ระบุจังหวัด")} · ${esc(c.company_name || "ไม่ระบุบริษัท")}</div></div></div>`).join("")}
+      <div class="cand" data-id="new"><input type="radio" name="cand" tabindex="-1"><div><b>เป็นรถคันใหม่</b><div class="muted">ลงทะเบียนใหม่ตามจังหวัดที่กรอก</div></div></div>`;
+  } else if (m.state === "new_vehicle") {
+    h = `<b>🆕 รถคันใหม่ ยังไม่เคยลงทะเบียน</b><p class="muted">เลือกบริษัทขนส่งด้านล่าง หรือปล่อยเป็น "ไม่ระบุบริษัท" (ระบบไม่เดาบริษัทจากเลขทะเบียน)</p>`;
+    reg = true; ver = !!m.needs_confirmation;
+  } else {
+    h = `<b>⚠️ อ่านทะเบียนไม่ชัดเจน</b><p class="muted">ตรวจสอบเลขทะเบียนให้ตรงกับภาพก่อน หรือถ่ายใหม่ — ระบบจะไม่จับคู่กับรถที่มีอยู่จากผลที่ไม่แน่ใจ</p>`;
+    reg = true; ver = true;
+  }
+  card.innerHTML = h; card.classList.remove("hide");
+  $("#regTitle").textContent = regTitle; $("#regCard").classList.toggle("hide", !reg);
+  $("#newCoWrap").classList.toggle("hide", $("#fCompany").value !== NEW_CO);
+  $("#verWrap").classList.toggle("hide", !ver); $("#fVerified").checked = false;
+  card.querySelectorAll(".cand").forEach((el) => (el.onclick = () => {
+    pick = el.dataset.id; card.querySelectorAll(".cand").forEach((x) => { x.classList.toggle("on", x === el); x.querySelector("input").checked = x === el; });
+    $("#regTitle").textContent = "ลงทะเบียนรถคันใหม่"; $("#regCard").classList.toggle("hide", pick !== "new"); updSave();
+  }));
+  updSave();
+}
+
+/* ---------- OCR ---------- */
+async function runOcr() {
+  const st = $("#ocrState"); st.innerHTML = '<div class="row" style="justify-content:flex-start"><span class="spin dk" style="flex:none"></span><div><b>AI กำลังอ่านป้ายทะเบียน...</b><div class="muted">ใช้เวลาประมาณ 2-5 วินาที</div></div></div>';
+  ocrBusy = true; updSave();
+  try {
+    const x = await DS.readPlate(blob); ocrRes = x; $("#fPlate").value = x.plate || ""; $("#fProv").value = x.province || ""; $("#fType").value = DS.VEHICLE_TYPES.includes(x.vehicle_type) ? x.vehicle_type : "";
+    const c = x.confidence != null ? Math.round(x.confidence * 100) : null;
+    st.innerHTML = x.found ? `✅ AI อ่านได้ — ตรวจสอบและแก้ไขได้ก่อนบันทึก ${c != null ? `<span class="badge ${c >= 85 ? "ok" : c >= 60 ? "warn" : "bad"}">ความมั่นใจ ${c}%</span>` : ""}` : "⚠️ AI ไม่พบป้ายทะเบียนในภาพ กรุณากรอกเองหรือถ่ายใหม่";
+  } catch (e) {
+    const hint = e.code === "API_KEY_MISSING" ? "ยังไม่ได้ตั้งค่า API Key ของ OCR ที่ฝั่งเซิร์ฟเวอร์" : e.code === "NOT_DEPLOYED" ? "ยังไม่ได้ deploy Edge Function ocr-plate (ดู README.md)" : e.message;
+    st.innerHTML = `<b style="color:var(--danger)">⚠️ อ่านทะเบียนอัตโนมัติไม่สำเร็จ</b><p class="muted">${esc(hint)}<br>กรอกเลขทะเบียนเองด้านล่างเพื่อบันทึกต่อได้</p><button class="ghost" id="retryOcr">ลองอ่านอีกครั้ง</button>`;
+    $("#retryOcr").onclick = runOcr;
+  }
+  ocrBusy = false; runMatch();
+  if (!$("#fPlate").value) $("#fPlate").focus();
+}
+
+/* ---------- บันทึก ---------- */
+const cleanErr = (e) => String((e && e.message) || "บันทึกไม่สำเร็จ").replace(/^[A-Z_]{4,}:\s*/, "");
+$("#rSave").onclick = async (ev) => {
+  const plate = $("#fPlate").value.trim(); if (!plate) return DS.toast("กรุณากรอกเลขทะเบียน", "error");
+  if (!match) return DS.toast("ยังตรวจสอบรถในระบบไม่เสร็จ", "info");
+  const btn = ev.target, m = match; saving = true; btn.disabled = true; btn.innerHTML = '<span class="spin"></span> กำลังบันทึก'; let path = "";
+  try {
+    let vehicleId = null, register = false;
+    if (m.state === "verify" && m.reason === "province_mismatch") { if (pick === "new") register = true; else vehicleId = pick; }
+    else if (!m.vehicle) register = true;
+    let companyId = null, newName = null;
+    if (!$("#regCard").classList.contains("hide")) { const s = $("#fCompany").value; if (s === NEW_CO) newName = $("#fNewCo").value.trim(); else if (s) companyId = s; }
+    const verified = humanEdited() || $("#fVerified").checked || (m.state === "verify" && m.reason === "province_mismatch" && !!pick);
+    path = `${session.user.id}/${Date.now()}.jpg`;
+    const up = await db.storage.from("plate-images").upload(path, blob, { contentType: "image/jpeg" }); if (up.error) throw up.error;
+    const { data, error } = await db.rpc("record_visit", {
+      p_plate: plate, p_province: $("#fProv").value.trim() || null, p_vehicle_type: $("#fType").value || null, p_note: $("#fNote").value.trim() || null,
+      p_image_path: path, p_confidence: ocrRes ? ocrRes.confidence : null, p_provider: ocrRes ? ocrRes.provider : null, p_source: "phone",
+      p_vehicle_id: vehicleId, p_company_id: companyId, p_new_company_name: newName, p_register: register, p_verified: verified });
+    if (error) { await db.storage.from("plate-images").remove([path]); path = ""; throw error; }
+    const rep = $("#dRep");
+    if (data.duplicate) {
+      await db.storage.from("plate-images").remove([path]); // ไม่บันทึกซ้ำ จึงไม่เก็บรูปที่เพิ่งอัปโหลด
+      $("#dIcon").textContent = "✋"; $("#dPlate").textContent = plate;
+      $("#dInfo").innerHTML = `<div class="muted">ไม่ได้บันทึกซ้ำ</div>`;
+      rep.className = "badge warn"; rep.textContent = `รถคันนี้ถูกบันทึกไว้เมื่อ ${DS.fmt.dateTime(data.capture_at)} (ภายใน ${data.window_minutes} นาที)`;
+      show("done"); DS.toast("ข้ามการบันทึกซ้ำ", "info");
+    } else {
+      $("#dIcon").textContent = "✅"; $("#dPlate").textContent = data.plate_number;
+      $("#dInfo").innerHTML = `${esc(data.province || "")}<div style="margin:8px auto;display:flex;justify-content:center">${coBadge(data.company)}</div><div class="muted">บันทึกเมื่อ ${DS.fmt.dateTime(data.capture_at)}</div>`;
+      rep.className = "badge " + (!data.new_vehicle && data.visit_count > 1 ? "warn" : "");
+      rep.textContent = data.new_vehicle ? "ลงทะเบียนรถคันใหม่และบันทึกครั้งแรกแล้ว" : data.visit_count > 1 ? `ทะเบียนนี้เคยเข้ามาแล้ว ${data.visit_count - 1} ครั้ง (ครั้งนี้เป็นครั้งที่ ${data.visit_count})` : "ทะเบียนนี้เข้ามาเป็นครั้งแรก";
+      show("done"); DS.toast("บันทึกทะเบียนรถเรียบร้อย"); if (navigator.vibrate) navigator.vibrate(60);
+    }
+  } catch (e) { if (path) { try { await db.storage.from("plate-images").remove([path]); } catch (_) {} } DS.toast(cleanErr(e), "error"); }
+  saving = false; btn.textContent = "ยืนยันและบันทึก"; updSave();
+};
+</script>
+</body>
+</html>
