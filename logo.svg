@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DockSense AI">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2DD4EE"/><stop offset="1" stop-color="#14B8A6"/></linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#g)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M96 190V140a44 44 0 0 1 44-44h50"/>
+    <path d="M322 96h50a44 44 0 0 1 44 44v50"/>
+    <path d="M416 322v50a44 44 0 0 1-44 44h-50"/>
+    <path d="M190 416h-50a44 44 0 0 1-44-44v-50"/>
+  </g>
+  <rect x="112" y="244" width="288" height="24" rx="12" fill="#2DD4EE"/>
+  <rect x="146" y="196" width="220" height="120" rx="18" fill="#F4F7FA"/>
+  <rect x="158" y="208" width="196" height="96" rx="9" fill="none" stroke="#0B1526" stroke-opacity=".22" stroke-width="4"/>
+  <path fill="#0B1526" fill-rule="evenodd" d="M214 222h34c27 0 46 15 46 34s-19 34-46 34h-34zm24 20v28h8c14 0 23-5 23-14s-9-14-23-14z"/>
+</svg>

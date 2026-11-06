@@ -1,1 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="#0d9488"/><rect x="96" y="176" width="320" height="160" rx="28" fill="none" stroke="#fff" stroke-width="22"/><circle cx="256" cy="256" r="38" fill="#fff"/><path d="M96 130h60M356 130h60M96 382h60M356 382h60" stroke="#fff" stroke-width="22" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DockSense AI">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2DD4EE"/><stop offset="1" stop-color="#14B8A6"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#0B1526"/>
+  <g transform="translate(256 256) scale(.78) translate(-256 -256)">
+  <g fill="none" stroke="url(#g)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M96 190V140a44 44 0 0 1 44-44h50"/>
+    <path d="M322 96h50a44 44 0 0 1 44 44v50"/>
+    <path d="M416 322v50a44 44 0 0 1-44 44h-50"/>
+    <path d="M190 416h-50a44 44 0 0 1-44-44v-50"/>
+  </g>
+  <rect x="112" y="244" width="288" height="24" rx="12" fill="#2DD4EE"/>
+  <rect x="146" y="196" width="220" height="120" rx="18" fill="#F4F7FA"/>
+  <rect x="158" y="208" width="196" height="96" rx="9" fill="none" stroke="#0B1526" stroke-opacity=".22" stroke-width="4"/>
+  <path fill="#0B1526" fill-rule="evenodd" d="M214 222h34c27 0 46 15 46 34s-19 34-46 34h-34zm24 20v28h8c14 0 23-5 23-14s-9-14-23-14z"/>
+</g>
+</svg>

@@ -1,11 +1,21 @@
 {
   "name": "DockSense AI",
   "short_name": "DockSense",
-  "description": "ระบบบันทึกทะเบียนรถเข้าพื้นที่",
+  "description": "ถ่ายรูปป้าย ให้ AI อ่าน แล้วกดบันทึกทะเบียนรถที่เข้าพื้นที่",
   "start_url": "index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#f1f5f9",
-  "theme_color": "#0d9488",
+  "orientation": "portrait",
+  "background_color": "#0B1526",
+  "theme_color": "#0B1526",
   "lang": "th",
-  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "สแกนทะเบียน", "short_name": "สแกน", "url": "scan.html", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ]
 }

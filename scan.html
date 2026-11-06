@@ -3,10 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d9488">
+<meta name="theme-color" content="#0B1526">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <style>
 .co{display:flex;align-items:center;gap:10px;min-width:0}
@@ -18,7 +20,7 @@
 select,input,textarea{max-width:100%;min-width:0}
 .grid>*{min-width:0}
 .cand{display:flex;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;margin-top:8px;cursor:pointer;min-height:48px}
-.cand.on{border-color:#0d9488;box-shadow:0 0 0 2px rgba(13,148,136,.25)}
+.cand.on{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 25%,transparent)}
 .cand input{width:auto;flex:none;margin:0}
 .ds-chk{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.5}
 .ds-chk input{width:22px;height:22px;flex:none;margin:1px 0 0;padding:0}
@@ -32,26 +34,26 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
 </script>
 </head>
 <body style="padding-bottom:20px">
-<header class="top"><a href="index.html" class="btn ghost" style="padding:8px 12px">← กลับ</a><div class="brand"><span class="logo"></span>สแกนทะเบียนรถ</div><button class="ghost" id="themeBtn">◐</button></header>
+<header class="top"><a href="index.html" class="btn ghost" style="padding:8px 14px;min-height:44px;font-size:14px;color:#fff"><svg class="ico" viewBox="0 0 24 24" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg>กลับ</a><div class="brand"><span class="logo" role="img" aria-label="DockSense AI"></span><span>สแกนทะเบียน</span></div><button class="ghost iconbtn" id="themeBtn" aria-label="สลับโหมดสว่าง/มืด"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></svg></button></header>
 <main class="wrap" style="max-width:560px">
   <div id="loading" class="empty"><span class="spin dk"></span></div>
-  <div id="denied" class="empty hide">🔒 บัญชีนี้ไม่มีสิทธิ์บันทึกทะเบียน<br>ติดต่อผู้ดูแลระบบเพื่อขอสิทธิ์เจ้าหน้าที่</div>
+  <div id="denied" class="empty hide"><b style="color:var(--text);font-size:18px">บัญชีนี้ยังบันทึกทะเบียนไม่ได้</b><br>ขอให้ผู้ดูแลระบบเปลี่ยนสิทธิ์เป็น “เจ้าหน้าที่” ที่หน้าตั้งค่า</div>
 
   <!-- 1 กล้อง -->
   <section id="s-pick" class="hide">
-    <div class="cam"><video id="video" playsinline muted></video><div class="frame"></div>
+    <div class="cam"><video id="video" playsinline muted></video><div class="frame"></div><div class="camhint">วางป้ายทะเบียนให้อยู่ในกรอบ</div>
       <div id="camErr" class="hide" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;text-align:center;padding:24px"></div>
-      <button class="flip" id="flip" aria-label="สลับกล้อง">🔄</button><button class="shutter" id="shoot" aria-label="ถ่ายภาพ">📷</button></div>
-    <p class="muted" style="text-align:center">วางป้ายทะเบียนให้อยู่ในกรอบประ</p>
+      <button class="flip" id="flip" aria-label="สลับกล้อง"><svg class="ico" viewBox="0 0 24 24" style="margin:auto"><path d="M4 8h12l-3-3M20 16H8l3 3"/></svg></button><button class="shutter" id="shoot" aria-label="ถ่ายภาพ"></button></div>
+    <div class="tips"><span>ถ่ายตรงหน้าป้าย</span><span>แสงพอ ไม่เงาสะท้อน</span><span>เห็นป้ายเต็มกรอบ</span></div>
     <div class="grid g2">
-      <label class="btn ghost" style="margin:0;color:var(--text);font-size:14px">🖼️ เลือกจากคลังภาพ<input id="gal" type="file" accept="image/*" class="hide"></label>
-      <label class="btn ghost" style="margin:0;color:var(--text);font-size:14px">📱 ใช้กล้องของเครื่อง<input id="nat" type="file" accept="image/*" capture="environment" class="hide"></label>
+      <label class="btn ghost" style="margin:0;color:var(--text);font-size:15px"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/></svg>เลือกจากคลังภาพ<input id="gal" type="file" accept="image/*" class="hide"></label>
+      <label class="btn ghost" style="margin:0;color:var(--text);font-size:15px"><svg class="ico" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.5"/></svg>ใช้กล้องของเครื่อง<input id="nat" type="file" accept="image/*" capture="environment" class="hide"></label>
     </div>
   </section>
 
   <!-- 2 ครอป -->
   <section id="s-crop" class="hide">
-    <p class="muted">ลากกรอบให้ครอบเฉพาะป้ายทะเบียน เพื่อให้ AI อ่านแม่นยำขึ้น</p>
+    <h1 style="font-size:20px;margin-top:0">ครอบเฉพาะป้ายทะเบียน</h1><p class="muted" style="margin:-6px 0 12px">ลากมุมให้กรอบพอดีกับป้าย AI จะอ่านแม่นขึ้น</p>
     <div style="display:flex;justify-content:center;background:#000;border-radius:14px;padding:8px"><div class="cropbox" id="cbox"><img id="cimg" alt="ภาพต้นฉบับ" draggable="false"><div class="crect" id="crect"><div class="hd" data-m="nw" style="left:-14px;top:-14px"></div><div class="hd" data-m="ne" style="right:-14px;top:-14px"></div><div class="hd" data-m="sw" style="left:-14px;bottom:-14px"></div><div class="hd" data-m="se" style="right:-14px;bottom:-14px"></div></div></div></div>
     <div class="grid g3" style="margin-top:12px"><button class="ghost" id="cRetake">ถ่ายใหม่</button><button class="ghost" id="cFull">ใช้ภาพเต็ม</button><button id="cOk">ใช้ส่วนที่เลือก</button></div>
   </section>
@@ -61,10 +63,10 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
     <img id="pv" class="pv" alt="ภาพป้ายทะเบียน">
     <div id="ocrState" class="card" style="margin-top:12px"></div>
     <div class="card">
-      <label>เลขทะเบียน *</label><input id="fPlate" class="platein" placeholder="เช่น 1กก 1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <label for="fPlate" style="margin-top:0">เลขทะเบียน (เทียบกับภาพป้ายด้านบน)</label><input id="fPlate" class="platein" placeholder="เช่น 1กก 1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
       <div class="grid g2"><div><label>จังหวัด</label><input id="fProv" list="provs"></div><div><label>ประเภทรถ</label><select id="fType"></select></div></div>
       <label>หมายเหตุ</label><input id="fNote">
-      <p class="muted">วันและเวลาบันทึกอัตโนมัติจากเวลาจริงของระบบ (Asia/Bangkok)</p>
+      <p class="muted" style="margin:12px 0 0">วันและเวลาบันทึกให้อัตโนมัติ (เวลาประเทศไทย)</p>
     </div>
     <div id="matchCard" class="card hide"></div>
     <div id="regCard" class="card hide">
@@ -387,7 +389,15 @@ async function runOcr() {
   try {
     const x = await DS.readPlate(blob); ocrRes = x; $("#fPlate").value = x.plate || ""; $("#fProv").value = x.province || ""; $("#fType").value = DS.VEHICLE_TYPES.includes(x.vehicle_type) ? x.vehicle_type : "";
     const c = x.confidence != null ? Math.round(x.confidence * 100) : null;
-    st.innerHTML = x.found ? `✅ AI อ่านได้ — ตรวจสอบและแก้ไขได้ก่อนบันทึก ${c != null ? `<span class="badge ${c >= 85 ? "ok" : c >= 60 ? "warn" : "bad"}">ความมั่นใจ ${c}%</span>` : ""}` : "⚠️ AI ไม่พบป้ายทะเบียนในภาพ กรุณากรอกเองหรือถ่ายใหม่";
+    const badge = c != null ? `<span class="badge ${c >= 85 ? "ok" : c >= 60 ? "warn" : "bad"}">ความมั่นใจ ${c}%</span>` : "";
+    if (!x.found) st.innerHTML = '<div class="state warn"><b>ไม่พบป้ายทะเบียนในภาพ</b><div class="muted">กรอกเลขเองด้านล่าง หรือถ่ายใหม่ให้เห็นป้ายชัดขึ้น</div></div>';
+    else if (x.needs_review) {
+      // AI อ่านสองรอบไม่ตรงกัน หรือรูปแบบป้ายผิดปกติ → ให้เทียบกับภาพก่อนบันทึก และเลือกคำอ่านอีกแบบได้
+      const alts = (x.alternatives || []).filter((a) => a && a !== x.plate);
+      st.innerHTML = `<div class="state warn"><b>AI ยังไม่แน่ใจ — เทียบกับภาพป้ายแล้วแก้ให้ถูกก่อนบันทึก</b> ${badge}` +
+        (alts.length ? `<div class="muted" style="margin:8px 0 6px">AI อ่านได้อีกแบบ แตะเพื่อใช้แทน</div><div class="alts">${alts.map((a) => `<button type="button" class="ghost alt" data-v="${esc(a)}"><span class="plate">${esc(a)}</span></button>`).join("")}</div>` : "") + "</div>";
+      st.querySelectorAll(".alt").forEach((b) => (b.onclick = () => { $("#fPlate").value = b.dataset.v; scheduleMatch(); DS.toast("เปลี่ยนเป็น " + b.dataset.v, "info"); }));
+    } else st.innerHTML = `<div class="state ok"><b>AI อ่านได้</b> ${badge}<div class="muted">เทียบกับภาพป้ายด้านบน แก้ไขได้ก่อนบันทึก</div></div>`;
   } catch (e) {
     const hint = e.code === "API_KEY_MISSING" ? "ยังไม่ได้ตั้งค่า API Key ของ OCR ที่ฝั่งเซิร์ฟเวอร์" : e.code === "NOT_DEPLOYED" ? "ยังไม่ได้ deploy Edge Function ocr-plate (ดู README.md)" : e.message;
     st.innerHTML = `<b style="color:var(--danger)">⚠️ อ่านทะเบียนอัตโนมัติไม่สำเร็จ</b><p class="muted">${esc(hint)}<br>กรอกเลขทะเบียนเองด้านล่างเพื่อบันทึกต่อได้</p><button class="ghost" id="retryOcr">ลองอ่านอีกครั้ง</button>`;

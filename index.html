@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d9488">
+<meta name="theme-color" content="#0B1526">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <style>
 .co{display:flex;align-items:center;gap:8px;min-width:0}
@@ -32,12 +33,12 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
 </head>
 <body>
 <!-- LOGIN -->
-<div id="login" class="wrap hide" style="max-width:380px;padding-top:12vh">
+<div id="login" class="wrap hide">
+  <div class="hero"><span class="logo" role="img" aria-label="DockSense AI"></span><h1>DockSense <em>AI</em></h1><p>ถ่ายรูปป้าย ให้ AI อ่าน แล้วกดบันทึก</p></div>
   <form id="loginForm" class="card">
-    <div style="text-align:center;margin-bottom:10px"><span class="logo" style="width:48px;height:48px;border-radius:14px"></span><h1 style="margin:8px 0 0">DockSense AI</h1><div class="muted">ระบบบันทึกทะเบียนรถเข้าพื้นที่</div></div>
-    <div id="nameWrap" class="hide"><label>ชื่อ-นามสกุล</label><input id="lname"></div>
-    <label>อีเมล</label><input id="lemail" type="email" autocomplete="email" required>
-    <label>รหัสผ่าน (อย่างน้อย 6 ตัว)</label><input id="lpass" type="password" minlength="6" autocomplete="current-password" required>
+    <div id="nameWrap" class="hide"><label for="lname">ชื่อ-นามสกุล</label><input id="lname" autocomplete="name"></div>
+    <label for="lemail" style="margin-top:0">อีเมล</label><input id="lemail" type="email" autocomplete="email" inputmode="email" required>
+    <label for="lpass">รหัสผ่าน (อย่างน้อย 6 ตัว)</label><div class="pw"><input id="lpass" type="password" minlength="6" autocomplete="current-password" required><button type="button" class="eye" id="peye" aria-label="แสดงรหัสผ่าน">แสดง</button></div>
     <div id="lerr" class="badge bad hide" style="display:block;margin-top:10px;border-radius:10px;padding:8px"></div>
     <button id="lbtn" style="width:100%;margin-top:14px">เข้าสู่ระบบ</button>
     <p style="text-align:center;margin:12px 0 0"><a href="#" id="lmode">ยังไม่มีบัญชี? สมัครสมาชิก</a></p>
@@ -47,8 +48,8 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
 
 <!-- APP -->
 <div id="app" class="hide">
-  <header class="top"><div class="brand"><span class="logo"></span>DockSense AI</div>
-    <div class="row" style="flex:none"><button class="ghost" id="themeBtn" aria-label="สลับธีม">◐</button><button class="ghost" id="outBtn">ออก</button></div></header>
+  <header class="top"><div class="brand"><span class="logo" role="img" aria-label="โลโก้ DockSense AI"></span><span>DockSense<em>AI</em></span></div>
+    <div class="row" style="flex:none"><button class="ghost iconbtn" id="themeBtn" aria-label="สลับโหมดสว่าง/มืด"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></svg></button><button class="ghost" id="outBtn">ออกจากระบบ</button></div></header>
   <main class="wrap">
     <section id="t-home"><h1>ภาพรวม</h1><div id="home"></div></section>
     <section id="t-history" class="hide">
@@ -72,12 +73,12 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
     <section id="t-search" class="hide"><h1>ค้นหาทะเบียน</h1><input id="sq" placeholder="พิมพ์เลขทะเบียน เช่น 1กก1234" style="font-size:17px"><div id="slist" style="margin-top:12px"></div></section>
     <section id="t-set" class="hide"><h1>ตั้งค่าระบบ</h1><div id="settings"></div></section>
   </main>
-  <a href="scan.html" id="fab" class="btn fab hide" aria-label="บันทึกทะเบียนรถ">📷</a>
-  <nav class="tabs">
-    <button data-t="home" class="on"><span class="ico">▦</span>ภาพรวม</button>
-    <button data-t="history"><span class="ico">☰</span>ประวัติ</button>
-    <button data-t="search"><span class="ico">⌕</span>ค้นหา</button>
-    <button data-t="set"><span class="ico">⚙</span>ตั้งค่า</button>
+  <a href="scan.html" id="fab" class="btn fab hide"><svg class="ico" viewBox="0 0 24 24"><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/><path d="M7.5 12h9"/></svg>สแกนทะเบียน</a>
+  <nav class="tabs" aria-label="เมนูหลัก">
+    <button data-t="home" class="on"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5" rx="2"/><rect x="13.5" y="11" width="7.5" height="10" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/></svg>ภาพรวม</button>
+    <button data-t="history"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>ประวัติ</button>
+    <button data-t="search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>ค้นหา</button>
+    <button data-t="set"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>ตั้งค่า</button>
   </nav>
 </div>
 <datalist id="provs"></datalist>
@@ -269,19 +270,20 @@ function reload() { ({ home: loadHome, history: () => loadHistory(true), search:
 /* ---------- home ---------- */
 function bars(data, color) {
   const max = Math.max(1, ...data.map((d) => d.count)), step = Math.ceil(data.length / 6) || 1;
-  return `<div class="bars">${data.map((d) => `<div class="bar" title="${esc(d.label)}: ${d.count} คัน"><i style="height:${(d.count / max) * 100}%;background:${color}"></i></div>`).join("")}</div><div class="axis">${data.map((d, i) => `<span>${i % step === 0 ? esc(d.label) : ""}</span>`).join("")}</div>`;
+  return `<div class="bars">${data.map((d) => `<div class="bar" title="${esc(d.label)}: ${d.count} คัน"><i style="height:${(d.count / max) * 100}%"></i></div>`).join("")}</div><div class="axis">${data.map((d, i) => `<span>${i % step === 0 ? esc(d.label) : ""}</span>`).join("")}</div>`;
 }
 async function loadHome() {
   if (!$("#home").innerHTML) $("#home").innerHTML = spin;
   const [s, r] = await Promise.all([db.rpc("dashboard_stats"), db.from("visit_details").select("*").order("capture_at", { ascending: false }).limit(8)]);
   if (s.error || r.error) { $("#home").innerHTML = errBox((s.error || r.error).message, "loadHome()"); return; }
   const d = s.data, n = (v) => Number(v).toLocaleString("th-TH");
-  const st = [["รถเข้าวันนี้", d.today_total], ["ทะเบียนไม่ซ้ำวันนี้", d.today_unique], ["เดือนนี้", d.month_total], ["ปีนี้", d.year_total], ["รายการทั้งหมด", d.all_total]];
-  $("#home").innerHTML = `<div class="grid g5">${st.map(([l, v]) => `<div class="card stat" style="margin:0"><b>${n(v)}</b><span class="muted">${l}</span></div>`).join("")}</div>
-  <div class="card" style="margin-top:12px"><h3>จำนวนรถรายวัน (30 วัน)</h3>${bars(d.daily, "#14b8a6")}</div>
-  <div class="card"><h3>รายเดือน (12 เดือน)</h3>${bars(d.monthly, "#6366f1")}</div>
-  <div class="card"><h3>สถิติรายปี</h3>${d.yearly.length ? bars(d.yearly, "#f59e0b") : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>
-  <div class="card"><h3>🟢 Recent Activity</h3>${r.data.length ? r.data.map(itemHtml).join("") : '<div class="empty">ยังไม่มีรายการ เริ่มสแกนทะเบียนคันแรกได้เลย</div>'}</div>`;
+  $("#home").innerHTML = `<div class="board"><div class="lbl">รถเข้าวันนี้</div><div class="big">${n(d.today_total)}<small>คัน</small></div><div class="sub">ทะเบียนไม่ซ้ำ <b>${n(d.today_unique)}</b> คัน</div></div>
+  <div class="chips"><div><b>${n(d.month_total)}</b><span>เดือนนี้</span></div><div><b>${n(d.year_total)}</b><span>ปีนี้</span></div><div><b>${n(d.all_total)}</b><span>ทั้งหมด</span></div></div>
+  <div class="card"><div class="row sp" style="align-items:baseline"><h3>รายการล่าสุด</h3><a href="#" id="seeAll" style="flex:none">ดูทั้งหมด</a></div>${r.data.length ? r.data.map(itemHtml).join("") : '<div class="empty">ยังไม่มีรายการ<br>กดปุ่ม “สแกนทะเบียน” เพื่อบันทึกคันแรก</div>'}</div>
+  <div class="card"><h3>จำนวนรถรายวัน (30 วัน)</h3>${bars(d.daily)}</div>
+  <div class="card"><h3>รายเดือน (12 เดือน)</h3>${bars(d.monthly)}</div>
+  <div class="card"><h3>สถิติรายปี</h3>${d.yearly.length ? bars(d.yearly) : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>`;
+  $("#seeAll").onclick = (e) => { e.preventDefault(); go("history"); };
   bindItems($("#home"), r.data);
 }
 /* ---------- บริษัท / โลโก้ ---------- */
@@ -316,7 +318,7 @@ const coOptions = (sel) => `<option value="">ไม่ระบุบริษ�
 
 function itemHtml(l) {
   const co = l.company_id ? `<div style="margin-top:4px">${coChip(l, 26)}</div>` : l.vehicle_id ? '<div style="margin-top:4px"><span class="badge warn">ไม่ระบุบริษัท</span></div>' : "";
-  return `<div class="item" data-id="${l.id}" style="padding:10px 0;border-top:1px solid var(--line);align-items:flex-start">${DS.thumb(l.image_path)}
+  return `<div class="item" data-id="${l.id}" style="padding:12px 0;border-top:1px solid var(--line);align-items:flex-start">${DS.thumb(l.image_path)}
   <div style="flex:1;min-width:0"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="plate wrapsafe">${esc(l.plate_number)}</span>${stBadge(l.status)}</div>
   <div class="muted wrapsafe">${esc(l.province || "-")} · ${esc(l.vehicle_type || "ไม่ระบุประเภท")}</div>${co}
   <div class="muted">${DS.fmt.ago(l.capture_at)} · ${DS.fmt.date(l.capture_at)} ${DS.fmt.time(l.capture_at)}</div></div></div>`;
@@ -593,6 +595,12 @@ setTimeout(function(){
     document.body.appendChild(d);
   }
 },4000);
+</script>
+<script>
+document.getElementById("peye").onclick = function () {
+  var i = document.getElementById("lpass"), show = i.type === "password";
+  i.type = show ? "text" : "password"; this.textContent = show ? "ซ่อน" : "แสดง"; this.setAttribute("aria-label", show ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน");
+};
 </script>
 </body>
 </html>
