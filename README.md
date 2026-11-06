@@ -1,36 +1,27 @@
-# DockSense AI (เวอร์ชันเว็บสแตติก)
+# DockSense AI (เว็บสแตติก + Supabase)
 
-ไม่ต้อง build — เป็นไฟล์ HTML/JS ล้วน เปิดผ่าน GitHub Pages (HTTPS) แล้วใช้บนมือถือได้ทันที
+ไม่มี build step — โฟลเดอร์นี้คือ "Root" ที่ Vercel ต้องเสิร์ฟ (index.html ต้องอยู่ชั้นบนสุด)
 
-| ไฟล์ | หน้าที่ |
-|---|---|
-| `index.html` | หน้าหลัก: ล็อกอิน, ภาพรวม/กราฟ, ประวัติ (กรอง/แก้ไข/ลบ/CSV), ค้นหา, ตั้งค่า/จัดการผู้ใช้ |
-| `scan.html` | หน้าสแกนทะเบียน: กล้อง → ครอป → AI OCR → ตรวจ/แก้ไข → บันทึก |
-| `common.js` `config.js` `style.css` | ส่วนที่ใช้ร่วมกัน (config.js ใส่ค่าโปรเจกต์ Supabase ไว้แล้ว) |
-| `supabase/functions/ocr-plate/` | โค้ด OCR ฝั่งเซิร์ฟเวอร์ (เก็บ API Key ปลอดภัย) |
+## ไฟล์
+index.html · scan.html · style.css · config.js · common.js · manifest.webmanifest · icon.svg · vercel.json
+supabase/functions/ocr-plate/ (Edge Function)
 
-## 1) ขึ้น GitHub Pages (ทำจากมือถือได้)
-1. สร้าง repo ใหม่บน GitHub (Public) แล้วอัปโหลดไฟล์ทั้งหมดในโฟลเดอร์นี้ (แตก zip ก่อน)
-2. Settings → Pages → Source: **Deploy from a branch** → Branch: `main` / `(root)` → Save
-3. รอ 1-2 นาที จะได้ลิงก์ `https://<ชื่อคุณ>.github.io/<ชื่อ repo>/`
-4. เปิดบนมือถือ แล้ว Chrome → ⋮ → "ติดตั้งแอป"
+## ขั้นตอน (ทำตามลำดับ)
+1. (ทำแล้ว) ฐานข้อมูล, RLS, bucket และ config.js ตั้งค่าไว้แล้ว
+2. Supabase secrets: ตั้ง ANTHROPIC_API_KEY (ต้องทำเอง)
+3. Supabase → Authentication → URL Configuration: Site URL = https://docksense-al.vercel.app
+   (ทดสอบเร็ว: ปิด "Confirm email" ที่ Providers → Email)
+4. Edge Function ocr-plate deploy แล้ว (ถ้าแก้โค้ดต้อง deploy ใหม่):
+   supabase login
+   supabase link --project-ref dhqvdbdqhcbymqvhpqop
+   supabase functions deploy ocr-plate
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxxx
+   (ไม่ต้องใช้ --no-verify-jwt — ฟังก์ชันรับเฉพาะผู้ที่ล็อกอินแล้ว กันคนนอกใช้เครดิต API)
+5. อัปโหลดทุกไฟล์ขึ้น GitHub (ให้ index.html อยู่ราก repo) → Vercel จะ deploy อัตโนมัติ
+   Vercel → Project Settings → General: Framework Preset = Other, Root Directory = (ว่าง/โฟลเดอร์ที่มี index.html),
+   Build Command และ Output Directory = ว่าง
+6. เปิดเว็บ → สมัครสมาชิก (คนแรก = admin) → ตั้งค่า → "ทดสอบการเชื่อมต่อ"
 
-## 2) ตั้งค่า Supabase ให้ล็อกอินได้
-Supabase Dashboard → Authentication → URL Configuration → ใส่ลิงก์ GitHub Pages ใน **Site URL**
-(ถ้าต้องการทดสอบเร็ว ปิด "Confirm email" ที่ Authentication → Providers → Email)
-
-## 3) เปิดใช้ AI OCR (ต้องทำเอง)
-```bash
-npm i -g supabase && supabase login
-supabase link --project-ref dhqvdbdqhcbymqvhpqop
-supabase functions deploy ocr-plate
-supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
-```
-แล้วกด "ทดสอบการเชื่อมต่อ" ในหน้า ตั้งค่า — ถ้ายังไม่ทำข้อนี้ สแกนแล้วกรอกเลขทะเบียนเองได้ แต่ AI จะยังไม่อ่านให้
-
-## สิทธิ์
-ผู้สมัครคนแรก = admin, คนถัดไป = viewer (admin ปรับได้ที่ ตั้งค่า → จัดการผู้ใช้) · admin ทำได้ทุกอย่าง, staff บันทึก/แก้ไข, viewer ดูอย่างเดียว (บังคับด้วย RLS ในฐานข้อมูล)
-
-## หมายเหตุ
-- `config.js` ใช้ publishable key ซึ่งออกแบบให้เปิดเผยได้ ข้อมูลถูกป้องกันด้วยการล็อกอิน + RLS
-- ส่งออกเป็น CSV (เปิดด้วย Excel ได้ รองรับภาษาไทย)
+## ตัวแปรสภาพแวดล้อม
+- Vercel: ไม่ต้องตั้งค่า
+- Supabase secrets: ANTHROPIC_API_KEY (จำเป็น), OCR_MODEL (ไม่บังคับ ค่าเริ่มต้น claude-sonnet-5-5), OCR_PROVIDER (ไม่บังคับ)
