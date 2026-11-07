@@ -5,7 +5,7 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 // รับรูปจาก ESP32-CAM: POST image/jpeg + header x-device-key  →  OCR → บันทึก → แจ้ง Telegram
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "x-device-key, x-local-ip, content-type",
+  "Access-Control-Allow-Headers": "x-device-key, x-local-ip, content-type, authorization, apikey, x-client-info",
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
@@ -18,12 +18,26 @@ Deno.serve(async (req) => {
   const sb = createClient(url, svc);
   try {
     const key = req.headers.get("x-device-key") || new URL(req.url).searchParams.get("key") || "";
-    if (!key) return json({ error: "missing device key" }, 401);
-    const { data: dev } = await sb.from("camera_devices").select("*").eq("device_key", key).eq("enabled", true).maybeSingle();
-    if (!dev) return json({ error: "invalid device key" }, 401);
+    const bearer = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    // deno-lint-ignore no-explicit-any
+    let dev: any = null, isPhone = false;
+    if (key) {
+      const r = await sb.from("camera_devices").select("*").eq("device_key", key).eq("enabled", true).maybeSingle();
+      dev = r.data;
+      if (!dev) return json({ error: "invalid device key" }, 401);
+    } else if (bearer) {
+      // กล้องมือถือ: ผู้ใช้ที่ล็อกอิน (ผู้ดูแล/เจ้าหน้าที่) ส่งภาพมาอ่านทะเบียนอัตโนมัติ
+      const { data: u } = await sb.auth.getUser(bearer);
+      if (!u?.user) return json({ error: "Unauthorized" }, 401);
+      const { data: prof } = await sb.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
+      if (!["admin", "staff"].includes(prof?.role)) return json({ error: "Forbidden" }, 403);
+      isPhone = true;
+      dev = { id: `phone-${u.user.id}`, name: (new URL(req.url).searchParams.get("name") || "มือถือ").slice(0, 30) };
+    } else return json({ error: "missing device key" }, 401);
     const isPreview = new URL(req.url).searchParams.get("preview") === "1";
+    if (isPhone && isPreview) return json({ error: "not supported" }, 400);
     const nowMs = Date.now(), due = nowMs - (lastWrite.get(dev.id) || 0) > 5000;
-    if (!isPreview || due) { lastWrite.set(dev.id, nowMs); await sb.from("camera_devices").update({ last_seen: new Date().toISOString() }).eq("id", dev.id); }
+    if (!isPhone && (!isPreview || due)) { lastWrite.set(dev.id, nowMs); await sb.from("camera_devices").update({ last_seen: new Date().toISOString() }).eq("id", dev.id); }
 
     const bytes = new Uint8Array(await req.arrayBuffer());
     if (bytes.length < 2000) return json({ error: "image too small" }, 400);
@@ -69,9 +83,8 @@ Deno.serve(async (req) => {
     if (!ocr.found || !ocr.plate) return json({ ok: true, found: false });
 
     const { data: th } = await sb.from("app_settings").select("value").eq("key", "ocr_thresholds").maybeSingle();
-    const high = Number(th?.value?.high ?? 0.85), low = Number(th?.value?.low ?? 0.6);
+    const high = Number(th?.value?.high ?? 0.85);
     const conf = Number(ocr.confidence ?? 0);
-    if (conf < low) return json({ ok: true, found: true, ignored: "low_confidence", plate: ocr.plate, confidence: conf });
 
     // 2) เก็บรูป
     const path = `camera/${dev.id}/${Date.now()}.jpg`;
@@ -84,7 +97,7 @@ Deno.serve(async (req) => {
     if (conf >= high && !ocr.needs_review) {
       const { data, error } = await sb.rpc("record_visit", {
         p_plate: ocr.plate, p_province: ocr.province, p_vehicle_type: ocr.vehicle_type, p_note: `กล้อง: ${dev.name}`,
-        p_image_path: path, p_confidence: conf, p_provider: ocr.provider ?? null, p_source: "esp32",
+        p_image_path: path, p_confidence: conf, p_provider: ocr.provider ?? null, p_source: isPhone ? "phone" : "esp32",
         p_vehicle_id: null, p_company_id: null, p_new_company_name: null, p_register: true, p_verified: false,
       });
       if (error) { await drop(); return json({ error: error.message }, 500); }
@@ -98,12 +111,12 @@ Deno.serve(async (req) => {
       if (dup?.length) { await drop(); return json({ ok: true, duplicate: true, plate: ocr.plate }); }
       const { data: ins, error } = await sb.from("vehicle_logs").insert({
         plate_number: ocr.plate, province: ocr.province, vehicle_type: ocr.vehicle_type, note: `กล้อง: ${dev.name}`,
-        image_path: path, ocr_confidence: conf, ocr_provider: ocr.provider ?? null, status: "needs_review", source: "esp32",
+        image_path: path, ocr_confidence: conf, ocr_provider: ocr.provider ?? null, status: "needs_review", source: isPhone ? "phone" : "esp32",
       }).select("id").single();
       if (error) { await drop(); return json({ error: error.message }, 500); }
       visitId = ins.id; status = "needs_review";
     }
-    await sb.from("camera_devices").update({ last_plate: ocr.plate }).eq("id", dev.id);
+    if (!isPhone) await sb.from("camera_devices").update({ last_plate: ocr.plate }).eq("id", dev.id);
 
     // 4) แจ้ง Telegram (ไม่ให้ล้มทั้งงานถ้าส่งไม่สำเร็จ)
     let notified: unknown = null;

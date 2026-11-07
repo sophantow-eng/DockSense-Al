@@ -40,7 +40,9 @@ const uint32_t WATCH_INTERVAL_MS   = 250;    // ช่วงพักระห�
 const framesize_t FRAME_SIZE       = FRAMESIZE_VGA;  // VGA 640x480 (ลอง FRAMESIZE_SVGA ได้ถ้าต้องการภาพละเอียดขึ้น)
 const uint8_t  JPEG_QUALITY        = 80;     // คุณภาพ JPEG ของ OCR / ภาพนิ่ง (0-100)
 const uint8_t  PREVIEW_JPEG_QUALITY = 55;    // ภาพสดในเว็บ (ใช้ค่านี้แค่ตอนต้องแปลง RGB565) · โหมด JPEG ในตัวใช้ PREVIEW_SENSOR_Q
-const int      PREVIEW_SENSOR_Q    = 24;     // บีบอัดภาพสดให้เล็ก ส่งไว (เลขมาก = ไฟล์เล็กลง ภาพหยาบลง 10–40)
+const int      PREVIEW_SENSOR_Q    = 16;     // คุณภาพภาพสด (เลขน้อย = คมขึ้นแต่ไฟล์ใหญ่/ช้าลง · 10–30)
+const framesize_t PREVIEW_SIZE     = FRAMESIZE_VGA;   // ภาพสดในเว็บ 640x480
+const framesize_t OCR_SIZE         = FRAMESIZE_SXGA;  // ภาพอ่านทะเบียน 1280x1024 (คมชัดกว่ามาก)
 const int      OCR_SENSOR_Q        = 10;     // ภาพอ่านทะเบียนให้คมชัด (เลขน้อย = คมขึ้น)
 const bool     FLIP_VERTICAL       = false;  // ภาพกลับหัว -> true
 const bool     MIRROR_HORIZONTAL   = false;  // ภาพกลับซ้ายขวา -> true
@@ -69,6 +71,7 @@ const bool     MIRROR_HORIZONTAL   = false;  // ภาพกลับซ้า�
 
 static bool nativeJpeg = false;
 static int  sensorQ = 12;
+static framesize_t curSize = FRAMESIZE_VGA;
 WebServer server(80);
 
 // ---------- LED ----------
@@ -105,7 +108,7 @@ static camera_config_t makeConfig(pixformat_t fmt, uint32_t xclk = 20000000) {
 
   if (psramFound()) {
     c.fb_location  = CAMERA_FB_IN_PSRAM;
-    c.frame_size   = FRAME_SIZE;
+    c.frame_size   = (fmt == PIXFORMAT_JPEG) ? OCR_SIZE : FRAME_SIZE;   // JPEG: เปิดที่ขนาดใหญ่สุด แล้วลดลงได้ตามต้องการ
     c.jpeg_quality = 12;
   } else {
     c.fb_location  = CAMERA_FB_IN_DRAM;
@@ -137,6 +140,7 @@ static bool initCamera() {
   }
 
   sensor_t* s = esp_camera_sensor_get();
+  if (s && nativeJpeg && psramFound()) { s->set_framesize(s, PREVIEW_SIZE); curSize = PREVIEW_SIZE; s->set_quality(s, PREVIEW_SENSOR_Q); sensorQ = PREVIEW_SENSOR_Q; }
   if (s) {
     Serial.printf("camera: sensor PID=0x%04x\n", s->id.PID);
     s->set_vflip(s, FLIP_VERTICAL ? 1 : 0);
@@ -155,11 +159,15 @@ static bool initCamera() {
 static bool captureJpeg(uint8_t** out, size_t* outLen, bool* needFree, uint8_t quality) {
   *out = nullptr; *outLen = 0; *needFree = false;
 
-  if (nativeJpeg) {   // ภาพสดบีบเล็ก / ภาพอ่านทะเบียนคมชัด
-    int want = quality <= PREVIEW_JPEG_QUALITY ? PREVIEW_SENSOR_Q : OCR_SENSOR_Q;
-    if (want != sensorQ) {
-      sensor_t* sn = esp_camera_sensor_get();
-      if (sn) { sn->set_quality(sn, want); sensorQ = want; camera_fb_t* d = esp_camera_fb_get(); if (d) esp_camera_fb_return(d); }
+  if (nativeJpeg && psramFound()) {   // ภาพสด = VGA บีบพอดี · ภาพอ่านทะเบียน = SXGA คมชัด
+    bool ocrShot = quality > PREVIEW_JPEG_QUALITY;
+    framesize_t wantS = ocrShot ? OCR_SIZE : PREVIEW_SIZE;
+    int wantQ = ocrShot ? OCR_SENSOR_Q : PREVIEW_SENSOR_Q;
+    sensor_t* sn = esp_camera_sensor_get();
+    if (sn && (wantS != curSize || wantQ != sensorQ)) {
+      if (wantS != curSize) { sn->set_framesize(sn, wantS); curSize = wantS; }
+      if (wantQ != sensorQ) { sn->set_quality(sn, wantQ); sensorQ = wantQ; }
+      for (int i = 0; i < 3; i++) { camera_fb_t* d = esp_camera_fb_get(); if (d) esp_camera_fb_return(d); delay(30); }
     }
   }
   camera_fb_t* fb = esp_camera_fb_get();
@@ -326,6 +334,22 @@ static bool postJpeg(const uint8_t* data, size_t len, bool preview, uint32_t* ne
   return code >= 200 && code < 300;
 }
 
+// ขนาดไฟล์ภาพสด (ใช้ตรวจว่าภาพในกรอบเปลี่ยน = มีรถเข้ามา) ไม่ส่งขึ้นเน็ต
+static long probeLen() {
+  if (nativeJpeg && psramFound()) {
+    sensor_t* sn = esp_camera_sensor_get();
+    if (sn && (curSize != PREVIEW_SIZE || sensorQ != PREVIEW_SENSOR_Q)) {
+      sn->set_framesize(sn, PREVIEW_SIZE); curSize = PREVIEW_SIZE; sn->set_quality(sn, PREVIEW_SENSOR_Q); sensorQ = PREVIEW_SENSOR_Q;
+      for (int i = 0; i < 3; i++) { camera_fb_t* d = esp_camera_fb_get(); if (d) esp_camera_fb_return(d); delay(30); }
+    }
+  }
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) return 0;
+  long n = (long)fb->len;
+  esp_camera_fb_return(fb);
+  return n;
+}
+
 // ---------- setup / loop ----------
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
@@ -424,7 +448,21 @@ void loop() {
       trigger = true;
     }
   } else if (OCR_INTERVAL_MS > 0) {
-    if (lastOcr == 0 || millis() - lastOcr >= OCR_INTERVAL_MS) trigger = true;
+    // อัตโนมัติ: ภาพในกรอบเปลี่ยน (รถเข้า) แล้วนิ่ง ~1.5 วินาที → อ่านทะเบียนทันที · นอกจากนั้นตรวจซ้ำตามรอบ
+    static uint32_t lastChk = 0; static long base = 0; static bool changed = false; static int calm = 0;
+    if (millis() - lastChk >= 700) {
+      lastChk = millis();
+      long L = probeLen();
+      if (L > 0) {
+        if (base == 0) base = L;
+        float d = fabsf((float)(L - base)) / (float)base;
+        if (d > 0.12f) { changed = true; calm = 0; }
+        else if (changed && d < 0.06f && ++calm >= 2) { trigger = true; changed = false; calm = 0; }
+        base = (long)(base * 0.6f + L * 0.4f);
+      }
+    }
+    if (!trigger && (lastOcr == 0 || millis() - lastOcr >= OCR_INTERVAL_MS)) trigger = true;
+    if (trigger && lastOcr != 0 && millis() - lastOcr < 3000) trigger = false;   // อย่าถี่กว่า 3 วินาที
   }
   if (trigger && WiFi.status() == WL_CONNECTED) {
     lastOcr = millis();
