@@ -9,7 +9,9 @@ const cors = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
-const lastWrite = new Map<string, number>(), frameN = new Map<string, number>();
+const lastWrite = new Map<string, number>(), frameN = new Map<string, number>(), lastOcrAt = new Map<string, number>(), lastPending = new Map<string, number>();
+// deno-lint-ignore no-explicit-any
+const bg = (p: Promise<any>) => { const er = (globalThis as any).EdgeRuntime; if (er?.waitUntil) { er.waitUntil(p); return Promise.resolve(); } return p; };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -47,30 +49,36 @@ Deno.serve(async (req) => {
     // ภาพตัวอย่างสำหรับหน้าเว็บ “ดูกล้อง” (ไม่อ่านทะเบียน ไม่บันทึกประวัติ)
     if (isPreview) {
       const watching = !!dev.watch_until && new Date(dev.watch_until) > new Date();
+      const wantSnap = !!dev.snap_req_at && (!dev.snap_at || new Date(dev.snap_req_at) > new Date(dev.snap_at));
+      const hd = new URL(req.url).searchParams.get("hd") === "1";
       const ip = (req.headers.get("x-local-ip") || "").slice(0, 45);
       const upd: Record<string, unknown> = { preview_at: new Date().toISOString() };
       if (ip && ip !== dev.local_ip) upd.local_ip = ip;
+      if (hd) upd.snap_at = new Date().toISOString();
+      const cast = (event: string) => fetch(`${url}/realtime/v1/api/broadcast`, {
+        method: "POST", headers: { apikey: svc, Authorization: `Bearer ${svc}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ topic: `live:${dev.id}`, event, private: false, payload: { b: encodeBase64(bytes), t: Date.now() } }] }),
+      }).catch(() => null);
       const saveStill = () => sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
-      if (watching) {
-        // มีคนดูอยู่: ส่งภาพเข้า Realtime ให้ทุกคนทันที (ช่องชื่อใช้ id กล้อง ซึ่งเห็นได้เฉพาะคนที่ล็อกอิน)
+      if (hd) {
+        await cast("snap");                       // ภาพคมชัดที่คนในเว็บขอ
+      } else if (watching) {
+        // มีคนดูอยู่: ส่งภาพเข้า Realtime ให้ทุกคนทันที (ช่องชื่อใช้ id กล้อง ซึ่งเห็นได้เฉพาะคนที่ล็อกอิน) แล้วตอบกล้องทันทีไม่รอ
         const n = (frameN.get(dev.id) || 0) + 1; frameN.set(dev.id, n);
-        const r = await fetch(`${url}/realtime/v1/api/broadcast`, {
-          method: "POST", headers: { apikey: svc, Authorization: `Bearer ${svc}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: [{ topic: `live:${dev.id}`, event: "frame", private: false, payload: { b: encodeBase64(bytes), t: Date.now() } }] }),
-        }).catch(() => null);
-        // เก็บภาพนิ่งสำรองทุก 4 เฟรม (เผื่อ Realtime ใช้ไม่ได้) โดยไม่หน่วงการตอบกลับ
-        if (!r || !r.ok || n % 4 === 0) {
-          const t = saveStill();
-          // deno-lint-ignore no-explicit-any
-          const er = (globalThis as any).EdgeRuntime;
-          if (er?.waitUntil) er.waitUntil(t); else await t;
-        }
+        await bg(cast("frame").then((r) => { if (!r || !r.ok || n % 4 === 0) return saveStill(); }));
       } else {
         const pv = await saveStill();
         if (pv.error) return json({ error: pv.error.message }, 500);
       }
-      if (due || upd.local_ip) await sb.from("camera_devices").update(upd).eq("id", dev.id);
-      return json({ ok: true, watch: watching, next_ms: watching ? 300 : 15000 });
+      if (due || upd.local_ip || hd) await sb.from("camera_devices").update(upd).eq("id", dev.id);
+      return json({ ok: true, watch: watching, snap: wantSnap && !hd, next_ms: watching ? 300 : 15000 });
+    }
+
+    // กันอ่านถี่เกิน (ประหยัดโควตา AI): ต่ออุปกรณ์ 1 ครั้งต่อ 6 วินาที
+    {
+      const last = lastOcrAt.get(dev.id) || 0;
+      if (Date.now() - last < 6000) return json({ ok: true, skipped: "cooldown" });
+      lastOcrAt.set(dev.id, Date.now());
     }
 
     const ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
@@ -78,8 +86,25 @@ Deno.serve(async (req) => {
       headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },
       body: JSON.stringify({ imageBase64: encodeBase64(bytes), mediaType: "image/jpeg" }),
     });
-    const ocr = await ocrRes.json();
-    if (!ocrRes.ok) return json({ error: ocr.error || "OCR failed", code: ocr.code }, 502);
+    const ocr = await ocrRes.json().catch(() => ({}));
+    if (!ocrRes.ok) {
+      // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
+      const lp = lastPending.get(dev.id) || 0;
+      if (Date.now() - lp < 60_000) return json({ ok: true, pending: false, error: ocr.error || "OCR failed", code: ocr.code, skipped: "pending_rate_limit" });
+      lastPending.set(dev.id, Date.now());
+      const ppath = `camera/${dev.id}/${Date.now()}.jpg`;
+      const pu = await sb.storage.from("plate-images").upload(ppath, bytes, { contentType: "image/jpeg" });
+      if (pu.error) return json({ error: pu.error.message }, 500);
+      const { data: pin, error: pe } = await sb.from("vehicle_logs").insert({
+        plate_number: "รอตรวจทะเบียน", note: `กล้อง: ${dev.name} — AI อ่านไม่ได้ (${ocr.code || "OCR_FAILED"}) กรุณาดูภาพแล้วพิมพ์ทะเบียน`,
+        image_path: ppath, ocr_confidence: 0, status: "needs_review", source: isPhone ? "phone" : "esp32",
+      }).select("id").single();
+      if (pe) return json({ error: pe.message }, 500);
+      try {
+        await fetch(`${url}/functions/v1/notify-visit`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ visit_id: pin.id, force: true }) });
+      } catch (_) { /* ignore */ }
+      return json({ ok: true, pending: true, code: ocr.code || "OCR_FAILED" }, 200);
+    }
     if (!ocr.found || !ocr.plate) return json({ ok: true, found: false });
 
     const { data: th } = await sb.from("app_settings").select("value").eq("key", "ocr_thresholds").maybeSingle();

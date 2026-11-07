@@ -30,8 +30,10 @@ const char* DEVICE_KEY = "__KEY__";
 const char* SUPABASE_ANON_KEY = "";          // ปกติปล่อยว่าง
 
 #define PIR_PIN __PIR__                      // ขาเซ็นเซอร์ตรวจจับ (PIR OUT) · -1 = ไม่ใช้
-const uint32_t OCR_INTERVAL_MS = __INTERVAL__; // เมื่อไม่ใช้ PIR: อ่านทะเบียนทุกกี่ ms (0 = ปิดการอ่านทะเบียน ดูภาพสดอย่างเดียว)
-const uint32_t SETTLE_MS   = 700;            // รอให้รถเข้ากรอบหลัง PIR ตรวจพบ
+const uint32_t OCR_INTERVAL_MS = __INTERVAL__; // เมื่อไม่มีเซ็นเซอร์: 0 = ดูภาพสดอย่างเดียว · 1 = ถ่ายเองเมื่อเห็นรถเข้ากรอบ · ≥60000 = เพิ่มตรวจซ้ำทุกกี่ ms (กินโควตา AI)
+#define RESULT_PIN 14                        // ขาแจ้งผลกลับ DevKit: HIGH 2 วินาทีเมื่อระบบอ่านทะเบียนได้ · -1 = ไม่ใช้
+const bool     USE_FLASH           = false;  // true = เปิดไฟแฟลชขาวบนบอร์ดตอนถ่ายอ่านทะเบียน (กลางคืน) — สว่างจ้ามาก
+const uint32_t SETTLE_MS   = 300;            // รอให้รถนิ่งหลังสัญญาณจากเซ็นเซอร์ (DevKit รอให้แล้ว จึงสั้นได้)
 const uint32_t COOLDOWN_MS = 8000;           // พักหลังอ่านทะเบียนแต่ละครั้ง (กันส่งรถคันเดิมซ้ำ)
 
 const bool     PREVIEW_ENABLED     = true;   // ส่งภาพตัวอย่างเข้าเว็บ (ปุ่ม ดูภาพสด)
@@ -40,10 +42,10 @@ const uint32_t WATCH_INTERVAL_MS   = 250;    // ช่วงพักระห�
 const framesize_t FRAME_SIZE       = FRAMESIZE_VGA;  // VGA 640x480 (ลอง FRAMESIZE_SVGA ได้ถ้าต้องการภาพละเอียดขึ้น)
 const uint8_t  JPEG_QUALITY        = 80;     // คุณภาพ JPEG ของ OCR / ภาพนิ่ง (0-100)
 const uint8_t  PREVIEW_JPEG_QUALITY = 55;    // ภาพสดในเว็บ (ใช้ค่านี้แค่ตอนต้องแปลง RGB565) · โหมด JPEG ในตัวใช้ PREVIEW_SENSOR_Q
-const int      PREVIEW_SENSOR_Q    = 16;     // คุณภาพภาพสด (เลขน้อย = คมขึ้นแต่ไฟล์ใหญ่/ช้าลง · 10–30)
+const int      PREVIEW_SENSOR_Q    = 20;     // คุณภาพภาพสด (เลขน้อย = คมขึ้นแต่ไฟล์ใหญ่/ช้าลง · 10–30)
 const framesize_t PREVIEW_SIZE     = FRAMESIZE_VGA;   // ภาพสดในเว็บ 640x480
 const framesize_t OCR_SIZE         = FRAMESIZE_SXGA;  // ภาพอ่านทะเบียน 1280x1024 (คมชัดกว่ามาก)
-const int      OCR_SENSOR_Q        = 10;     // ภาพอ่านทะเบียนให้คมชัด (เลขน้อย = คมขึ้น)
+const int      OCR_SENSOR_Q        = 12;     // ภาพอ่านทะเบียนให้คมชัด (เลขน้อย = คมขึ้น)
 const bool     FLIP_VERTICAL       = false;  // ภาพกลับหัว -> true
 const bool     MIRROR_HORIZONTAL   = false;  // ภาพกลับซ้ายขวา -> true
 // ===============================================================================
@@ -285,14 +287,15 @@ static bool             secureReady = false;
 // preview = true  -> ส่งไป ?preview=1 (เก็บเป็น latest.jpg ไม่ผ่าน OCR)
 // preview = false -> ส่งอ่านทะเบียน (OCR)
 // nextMs: ค่าที่เซิร์ฟเวอร์บอกให้รอ (ถ้ามีคนดูอยู่ จะถูกแทนด้วย WATCH_INTERVAL_MS)
-static bool postJpeg(const uint8_t* data, size_t len, bool preview, uint32_t* nextMs) {
+static bool serverWantsSnap = false, serverRecognized = false;   // คำตอบล่าสุดจากเซิร์ฟเวอร์
+static bool postJpeg(const uint8_t* data, size_t len, bool preview, uint32_t* nextMs, bool hd = false) {
   if (!secureReady) {
     secureClient.setInsecure();
     secureClient.setTimeout(10);
     secureReady = true;
   }
 
-  String url = String(INGEST_URL) + (preview ? "?preview=1" : "");
+  String url = String(INGEST_URL) + (preview ? (hd ? "?preview=1&hd=1" : "?preview=1") : "");
   httpc.setReuse(true);
   httpc.setConnectTimeout(6000);
   httpc.setTimeout(preview ? 8000 : 30000);
@@ -311,6 +314,8 @@ static bool postJpeg(const uint8_t* data, size_t len, bool preview, uint32_t* ne
                 (unsigned)len, code, (unsigned)(millis() - t0));
   if (code > 0) {
     String body = httpc.getString();
+    if (preview) { if (body.indexOf("\"snap\":true") >= 0) serverWantsSnap = true; }
+    else serverRecognized = (code >= 200 && code < 300 && body.indexOf("\"plate\":") >= 0);
     if (!preview || code >= 300) {
       if (body.length() > 600) body = body.substring(0, 600);
       Serial.println("http: response: " + body);
@@ -350,18 +355,46 @@ static long probeLen() {
   return n;
 }
 
+// ถ่ายภาพคมชัดอ่านทะเบียน: ถ่าย 2 เฟรม เลือกเฟรมที่ละเอียดกว่า · ส่งไม่สำเร็จจะลองใหม่อีก 1 ครั้ง
+static void ocrShot() {
+  for (int attempt = 0; attempt < 2; attempt++) {
+    if (USE_FLASH) { digitalWrite(LED_FLASH_PIN, HIGH); delay(120); }
+    uint8_t *a = nullptr, *b = nullptr; size_t la = 0, lb = 0; bool fa = false, fb = false;
+    bool oka = captureJpeg(&a, &la, &fa, JPEG_QUALITY);
+    delay(150);
+    bool okb = captureJpeg(&b, &lb, &fb, JPEG_QUALITY);
+    if (USE_FLASH) digitalWrite(LED_FLASH_PIN, LOW);
+    uint8_t* best = nullptr; size_t bl = 0; bool bf = false;
+    if (oka && (!okb || la >= lb)) { best = a; bl = la; bf = fa; if (okb && fb) free(b); }
+    else if (okb) { best = b; bl = lb; bf = fb; if (oka && fa) free(a); }
+    if (!best) { blinkRed(4); continue; }
+    serverRecognized = false;
+    bool ok = postJpeg(best, bl, false, nullptr);
+    if (bf) free(best);
+    if (ok) {
+      if (serverRecognized && RESULT_PIN >= 0) { digitalWrite(RESULT_PIN, HIGH); delay(2000); digitalWrite(RESULT_PIN, LOW); }
+      blinkRed(1);
+      return;
+    }
+    blinkRed(4);
+    secureClient.stop();
+    delay(500);
+  }
+}
+
 // ---------- setup / loop ----------
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   Serial.begin(115200);
   delay(500);
-  Serial.println("\n=== DockSense CAM v4 ===");
+  Serial.println("\n=== DockSense CAM v5 ===");
 
   pinMode(LED_RED_PIN, OUTPUT);
   digitalWrite(LED_RED_PIN, HIGH);
   pinMode(LED_FLASH_PIN, OUTPUT);
   digitalWrite(LED_FLASH_PIN, LOW);
-  if (PIR_PIN >= 0) pinMode(PIR_PIN, INPUT);
+  if (PIR_PIN >= 0) pinMode(PIR_PIN, INPUT_PULLDOWN);
+  if (RESULT_PIN >= 0) { pinMode(RESULT_PIN, OUTPUT); digitalWrite(RESULT_PIN, LOW); }
 
   Serial.printf("PSRAM: %s\n", psramFound() ? "found" : "NOT FOUND (เปิด Tools -> PSRAM)");
 
@@ -438,7 +471,19 @@ void loop() {
     }
   }
 
-  // อ่านทะเบียน (OCR): ตาม PIR หรือตั้งเวลา (OCR_INTERVAL_MS = 0 และไม่มี PIR = ปิด)
+  // คนในเว็บกด “ถ่ายทะเบียน” → ถ่ายภาพคมชัดส่งไปให้ทันที (ไม่ผ่าน AI)
+  if (serverWantsSnap && WiFi.status() == WL_CONNECTED) {
+    serverWantsSnap = false;
+    uint8_t* jpg = nullptr; size_t len = 0; bool nf = false;
+    if (captureJpeg(&jpg, &len, &nf, JPEG_QUALITY)) {
+      uint32_t dummy = 0;
+      postJpeg(jpg, len, true, &dummy, true);
+      if (nf && jpg) free(jpg);
+    }
+    lastPreview = 0;   // ส่งภาพสดต่อทันที
+  }
+
+  // อ่านทะเบียน (OCR): ตามสัญญาณจากเซ็นเซอร์ (DevKit+HC-SR04 / PIR) หรือถ่ายเองเมื่อเห็นรถเข้ากรอบ
   static uint32_t lastOcr = 0;
   bool trigger = false;
   if (PIR_PIN >= 0) {
@@ -461,18 +506,12 @@ void loop() {
         base = (long)(base * 0.6f + L * 0.4f);
       }
     }
-    if (!trigger && (lastOcr == 0 || millis() - lastOcr >= OCR_INTERVAL_MS)) trigger = true;
-    if (trigger && lastOcr != 0 && millis() - lastOcr < 3000) trigger = false;   // อย่าถี่กว่า 3 วินาที
+    if (!trigger && OCR_INTERVAL_MS >= 60000 && (lastOcr == 0 || millis() - lastOcr >= OCR_INTERVAL_MS)) trigger = true;
+    if (trigger && lastOcr != 0 && millis() - lastOcr < 8000) trigger = false;   // อย่าถี่กว่า 8 วินาที (ประหยัดโควตา AI)
   }
   if (trigger && WiFi.status() == WL_CONNECTED) {
     lastOcr = millis();
-    uint8_t* jpg = nullptr; size_t len = 0; bool nf = false;
-    if (captureJpeg(&jpg, &len, &nf, JPEG_QUALITY)) {
-      bool ok = postJpeg(jpg, len, false, nullptr);
-      if (nf && jpg) free(jpg);
-      blinkRed(ok ? 1 : 4);
-    } else {
-      blinkRed(4);
-    }
+    ocrShot();
+    lastOcr = millis();
   }
 }
