@@ -285,20 +285,29 @@ const b64url = (b) => "data:image/jpeg;base64," + b;
 const blobToDataUrl = (b) => new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); });
 
 function liveView(startId) {
-  const m = DS.modal("📺 ภาพสด", `<div class="camtabs" id="lvTabs"></div>
+  const m = DS.modal("📺 ภาพสด", `<div class="seg" id="lvKind"><button type="button" data-k="esp">📷 ESP32-CAM</button><button type="button" data-k="phone">📱 กล้องมือถือ</button></div><div class="camtabs" id="lvTabs" style="margin-top:8px"></div>
     <div class="camwrap"><img id="lvImg" alt="ภาพสด"><div class="camload" id="lvWait">กำลังหากล้อง…</div></div>
     <p class="muted" id="lvInfo" style="margin:8px 0 0"></p>
     <div class="row" style="margin-top:10px">${DS.can(me, "write") ? '<button id="lvSnap" type="button" disabled>📸 ถ่ายทะเบียน</button>' : ""}<button class="ghost" id="lvFs" type="button">เต็มจอ</button><button class="ghost" id="lvX" type="button">ปิด</button></div>
     <a id="lvLan" class="muted hide" target="_blank" rel="noopener" style="display:block;margin-top:8px"></a>`);
   const q = (s) => m.querySelector(s);
-  let esp = [], phones = [], cur = null, ch = null, lobby = null, lastFrame = null, frames = 0, t0 = Date.now(), lastAt = 0, watchT = null, dead = false;
+  let kind = "esp", esp = [], phones = [], cur = null, ch = null, lobby = null, lastFrame = null, frames = 0, t0 = Date.now(), lastAt = 0, watchT = null, dead = false;
   const camList = () => [...esp.map((c) => ({ id: c.id, name: c.name, kind: "esp", on: camOn(c), ip: c.local_ip })), ...phones.map((p) => ({ id: p.id, name: p.name, kind: "phone", on: true }))];
   const tabs = () => {
-    const l = camList(), el = q("#lvTabs"); if (!el) return;
-    el.innerHTML = l.length ? l.map((c) => `<button type="button" class="camtab${cur && cur.id === c.id ? " on" : ""}" data-id="${esc(c.id)}"><span class="dot ${c.on ? "on" : ""}"></span>${c.kind === "phone" ? "📱" : "📷"} ${esc(c.name)}</button>`).join("") : "";
+    const all = camList(), l = all.filter((c) => c.kind === kind), el = q("#lvTabs"); if (!el) return;
+    q("#lvKind").querySelectorAll("button").forEach((b) => { const k = b.dataset.k, n = all.filter((c) => c.kind === k && c.on).length; b.classList.toggle("on", k === kind); b.textContent = (k === "esp" ? "📷 ESP32-CAM" : "📱 กล้องมือถือ") + (n ? ` (${n})` : ""); });
+    el.innerHTML = l.length > 1 ? l.map((c) => `<button type="button" class="camtab${cur && cur.id === c.id ? " on" : ""}" data-id="${esc(c.id)}"><span class="dot ${c.on ? "on" : ""}"></span>${esc(c.name)}</button>`).join("") : "";
     el.querySelectorAll(".camtab").forEach((b) => (b.onclick = () => select(b.dataset.id)));
-    if (!l.length) { const w = q("#lvWait"); if (w) { w.style.display = ""; w.textContent = "ยังไม่มีกล้องออนไลน์ — เปิดกล้อง ESP32 หรือกด “ใช้มือถือเป็นกล้อง” ที่มือถืออีกเครื่อง"; } }
+    if (!l.length) {
+      if (ch) { db.removeChannel(ch); ch = null; } cur = null; clearInterval(watchT);
+      const w = q("#lvWait"), i = q("#lvImg"); if (i) i.removeAttribute("src");
+      if (w) { w.style.display = ""; w.textContent = kind === "esp" ? "ยังไม่มีกล้อง ESP32 — ตั้งค่าได้ที่ ตั้งค่า → กล้อง" : "ยังไม่มีมือถือที่เปิดกล้องอยู่ — ให้เจ้าหน้าที่กด “ใช้มือถือเป็นกล้อง” ที่หน้าแรก"; }
+      const sb = q("#lvSnap"); if (sb) sb.disabled = true; const lan = q("#lvLan"); if (lan) lan.classList.add("hide");
+    }
   };
+  const pickFor = (k, pref) => { const l = camList().filter((c) => c.kind === k); return l.find((c) => c.id === pref) || l.find((c) => c.on) || l[0]; };
+  const setKind = (k) => { kind = k; const p = pickFor(k); if (p) select(p.id); else tabs(); };
+  q("#lvKind").querySelectorAll("button").forEach((b) => (b.onclick = () => setKind(b.dataset.k)));
   const close = () => { dead = true; clearInterval(watchT); clearInterval(infoT); if (ch) db.removeChannel(ch); if (lobby) db.removeChannel(lobby); m.remove(); };
   q("#lvX").onclick = close;
   new MutationObserver(() => { if (!m.isConnected && !dead) close(); }).observe(document.body, { childList: true });
@@ -318,7 +327,7 @@ function liveView(startId) {
   };
   async function select(id) {
     const c = camList().find((x) => x.id === id); if (!c) return;
-    cur = c; lastFrame = null; lastAt = 0; frames = 0; t0 = Date.now(); clearInterval(watchT);
+    cur = c; kind = c.kind; lastFrame = null; lastAt = 0; frames = 0; t0 = Date.now(); clearInterval(watchT);
     if (ch) { db.removeChannel(ch); ch = null; }
     const w = q("#lvWait"), i = q("#lvImg"); if (i) i.removeAttribute("src"); if (w) { w.style.display = ""; w.innerHTML = '<span class="spin"></span> กำลังเชื่อมต่อกล้อง…'; }
     const s = q("#lvSnap"); if (s) s.disabled = true; tabs();
@@ -355,9 +364,9 @@ function liveView(startId) {
   (async () => {
     const { data } = await db.from("camera_status").select("*").eq("enabled", true).order("name"); esp = data || [];
     lobby = db.channel("live-lobby", { config: { private: true } });
-    const sync = () => { const seen = new Map(); Object.values(lobby.presenceState()).flat().forEach((p) => { if (p.kind === "phone" && p.id) seen.set(p.id, p); }); phones = [...seen.values()]; tabs(); if (!cur) { const l = camList(); const pick = l.find((c) => c.id === startId) || l.find((c) => c.on) || l[0]; if (pick) select(pick.id); } else if (!camList().some((c) => c.id === cur.id)) tabs(); };
+    const sync = () => { const seen = new Map(); Object.values(lobby.presenceState()).flat().forEach((p) => { if (p.kind === "phone" && p.id) seen.set(p.id, p); }); phones = [...seen.values()]; tabs(); if (!cur) { const p = pickFor(kind, startId); if (p) select(p.id); else tabs(); } else if (!camList().some((c) => c.id === cur.id)) setKind(kind); else tabs(); };
     lobby.on("presence", { event: "sync" }, sync).on("presence", { event: "leave" }, sync).subscribe((st) => { if (st === "SUBSCRIBED") sync(); });
-    tabs(); if (esp.length) { const l = camList(); const pick = l.find((c) => c.id === startId) || l.find((c) => c.on) || l[0]; select(pick.id); }
+    tabs(); const p = pickFor("esp", startId); if (p) select(p.id);
   })();
 }
 
