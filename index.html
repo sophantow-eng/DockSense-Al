@@ -209,7 +209,7 @@ window.DS_CONFIG = {
   window.addEventListener("offline", () => toast("ออฟไลน์อยู่ — ตรวจสอบอินเทอร์เน็ต", "error"));
   window.addEventListener("online", () => toast("กลับมาออนไลน์แล้ว", "info"));
 
-  window.DS = { db, esc, norm, toggleTheme, fmt, toast, modal, signedUrl, thumb, hydrateImages, can, requireAuth, readPlate, pingOcr, VEHICLE_TYPES, PROVINCES, TZ };
+  window.DS = { db, esc, norm, toggleTheme, fmt, toast, modal, signedUrl, thumb, hydrateImages, can, requireAuth, readPlate, pingOcr, fnErr, VEHICLE_TYPES, PROVINCES, TZ };
 
   if (keyMissing) document.addEventListener("DOMContentLoaded", () => {
     const d = document.createElement("div");
@@ -308,7 +308,7 @@ const coChip = (c, sz) => (c && (c.company_id || c.id || c.company_name))
 const ST = { matched: ["รู้จัก", "ok"], verified: ["ตรวจสอบแล้ว", "ok"], new_vehicle: ["รถใหม่", ""], needs_review: ["ต้องตรวจสอบ", "warn"], unmatched: ["ยังไม่จับคู่", "warn"], legacy: ["ข้อมูลเดิม", ""] };
 const stBadge = (s) => { const x = ST[s] || [s || "-", ""]; return `<span class="badge ${x[1]}" style="flex:none">${esc(x[0])}</span>`; };
 async function loadCompanies() {
-  const { data, error } = await db.from("companies").select("id,company_name,logo_url,brand_color").order("company_name");
+  const { data, error } = await db.from("companies").select("id,company_name,logo_url,brand_color,notify_telegram").order("company_name");
   if (!error) companies = data;
   const cur = $("#fco").value;
   $("#fco").innerHTML = '<option value="">ทั้งหมด</option>' + companies.map((c) => `<option value="${esc(c.id)}">${esc(c.company_name)}</option>`).join("");
@@ -516,7 +516,7 @@ async function renderCompaniesCard() {
   await loadCompanies();
   $("#cos").innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">บริษัทขนส่ง</h3><button class="ghost" id="coAdd" style="flex:none">+ เพิ่ม</button></div>
   <p class="muted">ใส่โลโก้และเลือกสีของแต่ละบริษัท จะแสดงในประวัติและหน้ารายละเอียดรถ ให้เห็นชื่อบริษัทได้ง่าย</p>
-  ${companies.length ? companies.map((c) => `<div class="item" data-id="${esc(c.id)}" style="padding:10px 0;border-top:1px solid var(--line);align-items:center">${coMark(c, 44)}<div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.company_name)}</b><div class="muted">${c.logo_url ? "มีโลโก้แล้ว" : "ยังไม่มีโลโก้ — แตะเพื่อเพิ่ม"}</div></div><span class="muted" style="flex:none">แก้ไข ›</span></div>`).join("") : '<div class="empty">ยังไม่มีบริษัท กด “+ เพิ่ม” เพื่อเริ่มต้น</div>'}</div>`;
+  ${companies.length ? companies.map((c) => `<div class="item" data-id="${esc(c.id)}" style="padding:10px 0;border-top:1px solid var(--line);align-items:center">${coMark(c, 44)}<div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.company_name)}</b><div class="muted">${c.logo_url ? "มีโลโก้แล้ว" : "ยังไม่มีโลโก้ — แตะเพื่อเพิ่ม"}${c.notify_telegram ? " · 🔔 แจ้งเตือน" : ""}</div></div><span class="muted" style="flex:none">แก้ไข ›</span></div>`).join("") : '<div class="empty">ยังไม่มีบริษัท กด “+ เพิ่ม” เพื่อเริ่มต้น</div>'}</div>`;
   $("#coAdd").onclick = () => companyModal(null);
   $("#cos").querySelectorAll(".item").forEach((el) => (el.onclick = () => companyModal(companies.find((c) => c.id === el.dataset.id))));
 }
@@ -527,6 +527,7 @@ function companyModal(c) {
   <label>โลโก้ (PNG / JPG / WebP)</label><input id="cmFile" type="file" accept="image/png,image/jpeg,image/webp">
   <div class="row" style="margin-top:6px;flex-wrap:wrap">${c && c.logo_url ? '<button class="ghost" id="cmRm" type="button">ลบโลโก้</button>' : ""}</div>
   <label>สีประจำบริษัท</label><div class="row" style="justify-content:flex-start;gap:8px"><input id="cmColor" type="color" style="width:56px;height:44px;padding:2px;flex:none" value="${coColor(c || { company_name: "" })}"><button class="ghost" id="cmAuto" type="button" style="flex:none">ใช้สีอัตโนมัติ</button></div>
+  <label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px"><input id="cmNotify" type="checkbox" style="width:22px;min-height:22px;flex:none;margin-top:2px" ${c && c.notify_telegram ? "checked" : ""}><span><b>แจ้งเตือน Telegram</b><br><span class="muted">ส่งข้อความเมื่อรถของบริษัทนี้เข้าพื้นที่</span></span></label>
   <div class="row" style="margin-top:14px"><button class="ghost" id="cmX" type="button">ยกเลิก</button><button id="cmOk" type="button">บันทึก</button></div>`);
   const cur = () => ({ company_name: m.querySelector("#cmName").value.trim() || (c ? c.company_name : "?"), logo_url: removeLogo || file ? null : c && c.logo_url, brand_color: colorSet ? m.querySelector("#cmColor").value : null });
   const prev = (src) => { m.querySelector("#cmPrev").innerHTML = (src ? `<img class="lg" style="width:64px;height:64px" src="${src}" alt="">` : coMark(cur(), 64)) + '<div class="muted">ตัวอย่างที่แสดงในระบบ</div>'; };
@@ -542,8 +543,8 @@ function companyModal(c) {
     const btn = ev.target; btn.disabled = true; btn.textContent = "กำลังบันทึก...";
     try {
       const color = colorSet ? m.querySelector("#cmColor").value : null; let id = c && c.id, oldLogo = c && c.logo_url;
-      if (c) { const { error } = await db.from("companies").update({ company_name: name, brand_color: color }).eq("id", id); if (error) throw error; }
-      else { const { data, error } = await db.from("companies").insert({ company_name: name, brand_color: color }).select("id").single(); if (error) throw error; id = data.id; }
+      if (c) { const { error } = await db.from("companies").update({ company_name: name, brand_color: color, notify_telegram: m.querySelector("#cmNotify").checked }).eq("id", id); if (error) throw error; }
+      else { const { data, error } = await db.from("companies").insert({ company_name: name, brand_color: color, notify_telegram: m.querySelector("#cmNotify").checked }).select("id").single(); if (error) throw error; id = data.id; }
       if (file) {
         const blob = await resizeLogo(file), path = `${id}/${Date.now()}.png`;
         const up = await db.storage.from("company-logos").upload(path, blob, { contentType: "image/png" }); if (up.error) throw up.error;
@@ -561,13 +562,60 @@ function companyModal(c) {
   };
 }
 
+
+/* ---------- Telegram ---------- */
+async function loadTelegram() {
+  const card = $("#tgCard"); if (!card) return;
+  const admin = me.role === "admin";
+  const { data: chans, error } = await db.from("notification_channels").select("*").eq("type", "telegram").order("created_at");
+  const list = admin && !error ? chans || [] : [];
+  card.innerHTML = `<h3>แจ้งเตือน Telegram</h3>
+  <p class="muted">เมื่อรถของบริษัทที่เปิด “แจ้งเตือน” เข้าพื้นที่ ระบบจะส่งทะเบียน บริษัท เวลา และรูปป้ายเข้า Telegram (เปิดได้ที่ ตั้งค่า → บริษัท → แตะชื่อบริษัท)</p>
+  <div id="tgBot" style="margin:8px 0"></div>
+  ${admin ? `<div id="tgList">${list.length ? list.map((c) => `<div class="item" data-id="${esc(c.id)}" style="padding:10px 0;border-top:1px solid var(--line);align-items:center"><div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.label || "Telegram")}</b><div class="muted wrapsafe">Chat ID ${esc(c.target)} · ${c.enabled ? "เปิดอยู่" : "ปิดอยู่"}</div></div><button class="ghost tgTest" style="flex:none;min-height:40px">ทดสอบ</button><button class="ghost tgTog" style="flex:none;min-height:40px">${c.enabled ? "ปิด" : "เปิด"}</button><button class="ghost tgDel" style="flex:none;min-height:40px">ลบ</button></div>`).join("") : '<div class="empty">ยังไม่มีปลายทาง — เพิ่มกลุ่มหรือแชต Telegram ด้านล่าง</div>'}</div>
+  <div class="row" style="margin-top:10px;gap:8px"><button id="tgAdd" type="button">+ เพิ่มปลายทาง</button><button class="ghost" id="tgFind" type="button">ค้นหา Chat ID</button></div>` : '<p class="muted">เฉพาะผู้ดูแลระบบที่ตั้งค่าได้</p>'}`;
+  const bot = $("#tgBot");
+  try { const { data, error: e } = await db.functions.invoke("notify-visit", { body: { ping: true } }); if (e) throw await DS.fnErr(e); bot.innerHTML = `<span class="badge ok">✓ เชื่อมต่อบอทแล้ว (@${esc(data.bot)})</span>`; }
+  catch (x) { bot.innerHTML = `<span class="badge bad">✗ ${x.code === "TOKEN_MISSING" ? "ยังไม่ได้ตั้งค่า Bot Token" : esc(x.message)}</span>`; }
+  if (!admin) return;
+  const addModal = (pre) => {
+    const m = DS.modal("เพิ่มปลายทาง Telegram", `<label>ชื่อเรียก (เช่น กลุ่มรปภ.)</label><input id="tgLabel" maxlength="60" value="${esc((pre && pre.title) || "")}"><label>Chat ID</label><input id="tgId" inputmode="numeric" placeholder="เช่น -1001234567890" value="${esc((pre && pre.chat_id) || "")}">
+    <div class="row" style="margin-top:14px"><button class="ghost" id="tgX" type="button">ยกเลิก</button><button id="tgOk" type="button">บันทึก</button></div>`);
+    m.querySelector("#tgX").onclick = () => m.remove();
+    m.querySelector("#tgOk").onclick = async (ev) => {
+      const target = m.querySelector("#tgId").value.trim(); if (!/^-?\d{5,}$/.test(target)) return DS.toast("Chat ID เป็นตัวเลข เช่น -1001234567890", "error");
+      ev.target.disabled = true;
+      const { error: e } = await db.from("notification_channels").insert({ type: "telegram", label: m.querySelector("#tgLabel").value.trim() || "Telegram", target, notify_mode: "all", enabled: true });
+      if (e) { DS.toast(e.message, "error"); ev.target.disabled = false; return; }
+      m.remove(); DS.toast("เพิ่มปลายทางแล้ว — กด “ทดสอบ” เพื่อส่งข้อความลอง"); loadTelegram();
+    };
+  };
+  $("#tgAdd").onclick = () => addModal();
+  $("#tgFind").onclick = async (ev) => {
+    ev.target.disabled = true;
+    try {
+      const { data, error: e } = await db.functions.invoke("notify-visit", { body: { discover: true } }); if (e) throw await DS.fnErr(e);
+      const m = DS.modal("เลือกแชตที่พบ", data.chats.length ? `<p class="muted">แชตที่ส่งข้อความหาบอทหรือเพิ่มบอทเข้าไป</p>${data.chats.map((c) => `<div class="cand" data-id="${esc(c.chat_id)}" data-t="${esc(c.title)}"><b class="wrapsafe">${esc(c.title)}</b><div class="muted">${esc(c.type)} · ${esc(c.chat_id)}</div></div>`).join("")}` : '<div class="empty">ยังไม่พบแชต — เพิ่มบอทเข้ากลุ่ม แล้วพิมพ์ข้อความ 1 ข้อความในกลุ่ม จากนั้นกดค้นหาใหม่</div>');
+      m.querySelectorAll(".cand").forEach((el) => (el.onclick = () => { m.remove(); addModal({ chat_id: el.dataset.id, title: el.dataset.t }); }));
+    } catch (x) { DS.toast(x.message, "error"); }
+    ev.target.disabled = false;
+  };
+  card.querySelectorAll("#tgList .item").forEach((el) => {
+    const id = el.dataset.id, c = list.find((r) => r.id === id);
+    el.querySelector(".tgTest").onclick = async (ev) => { ev.target.disabled = true; try { const { error: e } = await db.functions.invoke("notify-visit", { body: { test: true, chat_id: c.target } }); if (e) throw await DS.fnErr(e); DS.toast("ส่งข้อความทดสอบแล้ว"); } catch (x) { DS.toast(x.message, "error"); } ev.target.disabled = false; };
+    el.querySelector(".tgTog").onclick = async () => { const { error: e } = await db.from("notification_channels").update({ enabled: !c.enabled }).eq("id", id); if (e) DS.toast(e.message, "error"); else loadTelegram(); };
+    el.querySelector(".tgDel").onclick = async () => { if (!confirm("ลบปลายทางนี้?")) return; const { error: e } = await db.from("notification_channels").delete().eq("id", id); if (e) DS.toast(e.message, "error"); else loadTelegram(); };
+  });
+}
+
 /* ---------- settings ---------- */
 async function loadSettings() {
   const roleTh = { admin: "ผู้ดูแลระบบ", staff: "เจ้าหน้าที่", viewer: "ผู้ชม" };
   $("#settings").innerHTML = `<div class="card"><h3>บัญชีของฉัน</h3>${esc(me.full_name || "")} · ${esc(me.email || "")}<div class="muted">สิทธิ์: ${roleTh[me.role]}</div></div>
   <div class="card"><h3>การเชื่อมต่อ AI OCR</h3><p class="muted">อ่านป้ายที่ Supabase Edge Function <code>ocr-plate</code> เพื่อไม่ให้ API Key อยู่ในหน้าเว็บ (ดูวิธี deploy ใน README.md)</p><button id="ocrTest">ทดสอบการเชื่อมต่อ</button><div id="ocrRes" style="margin-top:10px"></div></div>
-  <div class="card"><h3>แจ้งเตือน Telegram <span class="badge">เร็วๆ นี้</span></h3><p class="muted">ฐานข้อมูลเตรียมตารางไว้แล้ว จะแจ้งเตือนเมื่อรถทะเบียนที่ติดตามเข้าบริษัท</p></div>
+  <div class="card" id="tgCard"><h3>แจ้งเตือน Telegram</h3><div class="muted">กำลังโหลด…</div></div>
   <div class="card"><h3>ติดตั้งเป็นแอป</h3><p class="muted">Android: Chrome → เมนู ⋮ → "ติดตั้งแอป" · iPhone: Safari → แชร์ → "เพิ่มไปยังหน้าจอโฮม"</p></div><div id="cos"></div><div id="users"></div>`;
+  loadTelegram();
   $("#ocrTest").onclick = async (e) => {
     e.target.disabled = true; const out = $("#ocrRes");
     try { const p = await DS.pingOcr(); out.innerHTML = `<span class="badge ok">✓ เชื่อมต่อสำเร็จ (ผู้ให้บริการ: ${esc(p)})</span>`; }

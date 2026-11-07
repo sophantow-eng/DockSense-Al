@@ -28,3 +28,10 @@ supabase/functions/ocr-plate/ (Edge Function)
   - GEMINI_MODEL (ไม่บังคับ — ถ้าไม่ตั้ง ระบบหารุ่น Gemini flash ที่ใช้ได้เอง), OCR_MODEL (ไม่บังคับ ใช้กับ claude), OCR_PROVIDER (ไม่บังคับ: gemini | claude)
   - ลำดับใช้งาน: OCR_PROVIDER → gemini → claude (ตัวไหนล้มจะสลับไปตัวถัดไปที่ตั้ง key ไว้)
   - Gemini อ่านป้าย 2 รอบเทียบกัน ถ้าไม่ตรงกันหน้าสแกนจะเตือนและให้เลือก
+
+## แจ้งเตือน Telegram (notify-visit)
+
+1. สร้างบอทกับ @BotFather → ได้ Bot Token
+2. ตั้ง secret `TELEGRAM_BOT_TOKEN` ใน Supabase (Edge Functions → Secrets)
+3. เพิ่มบอทเข้ากลุ่ม แล้วพิมพ์ข้อความ 1 ข้อความ → เว็บ: ตั้งค่า → แจ้งเตือน Telegram → “ค้นหา Chat ID” → เลือกกลุ่ม → บันทึก → ทดสอบ
+4. ตั้งค่า → บริษัท → แตะบริษัท → ติ๊ก “แจ้งเตือน Telegram”

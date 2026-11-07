@@ -439,6 +439,7 @@ $("#rSave").onclick = async (ev) => {
       $("#dInfo").innerHTML = `${esc(data.province || "")}<div style="margin:8px auto;display:flex;justify-content:center">${coBadge(data.company)}</div><div class="muted">บันทึกเมื่อ ${DS.fmt.dateTime(data.capture_at)}</div>`;
       rep.className = "badge " + (!data.new_vehicle && data.visit_count > 1 ? "warn" : "");
       rep.textContent = data.new_vehicle ? "ลงทะเบียนรถคันใหม่และบันทึกครั้งแรกแล้ว" : data.visit_count > 1 ? `ทะเบียนนี้เคยเข้ามาแล้ว ${data.visit_count - 1} ครั้ง (ครั้งนี้เป็นครั้งที่ ${data.visit_count})` : "ทะเบียนนี้เข้ามาเป็นครั้งแรก";
+      db.functions.invoke("notify-visit", { body: { visit_id: data.visit_id } }).catch(() => {}); // แจ้งเตือน Telegram (ไม่รอผล)
       show("done"); DS.toast("บันทึกทะเบียนรถเรียบร้อย"); if (navigator.vibrate) navigator.vibrate(60);
     }
   } catch (e) { if (path) { try { await db.storage.from("plate-images").remove([path]); } catch (_) {} } DS.toast(cleanErr(e), "error"); }
