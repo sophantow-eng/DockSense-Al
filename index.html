@@ -241,7 +241,7 @@ $("#loginForm").onsubmit = async (e) => {
     else { const { data, error } = await db.auth.signUp({ email, password, options: { data: { full_name: $("#lname").value } } }); if (error) throw error;
       if (!data.session) { DS.toast("สมัครสำเร็จ กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ", "info"); $("#lmode").click(); b.disabled = false; return; } }
     boot();
-  } catch (x) { const el = $("#lerr"); el.textContent = /invalid login/i.test(x.message) ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง" : x.message; el.classList.remove("hide"); }
+  } catch (x) { const el = $("#lerr"); el.textContent = /invalid login/i.test(x.message) ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง" : /rate limit/i.test(x.message) ? "ส่งอีเมลยืนยันบ่อยเกินไป กรุณารอสักครู่ (ประมาณ 1 ชั่วโมง) แล้วลองสมัครใหม่ หรือแจ้งผู้ดูแลระบบ" : /already registered/i.test(x.message) ? "อีเมลนี้สมัครแล้ว กด “เข้าสู่ระบบ” แทน" : /not confirmed/i.test(x.message) ? "ยังไม่ได้ยืนยันอีเมล กรุณากดลิงก์ในอีเมลที่ได้รับ" : x.message; el.classList.remove("hide"); }
   b.disabled = false;
 };
 $("#outBtn").onclick = async () => { await db.auth.signOut(); location.reload(); };
