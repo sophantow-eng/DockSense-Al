@@ -35,3 +35,12 @@ supabase/functions/ocr-plate/ (Edge Function)
 2. ตั้ง secret `TELEGRAM_BOT_TOKEN` ใน Supabase (Edge Functions → Secrets)
 3. เพิ่มบอทเข้ากลุ่ม แล้วพิมพ์ข้อความ 1 ข้อความ → เว็บ: ตั้งค่า → แจ้งเตือน Telegram → “ค้นหา Chat ID” → เลือกกลุ่ม → บันทึก → ทดสอบ
 4. ตั้งค่า → บริษัท → แตะบริษัท → ติ๊ก “แจ้งเตือน Telegram”
+
+## กล้อง ESP32-CAM (camera-ingest)
+
+ESP32-CAM ถ่ายรูป → `POST` JPEG ไปที่ `…/functions/v1/camera-ingest` พร้อมหัว `x-device-key` →
+ระบบอ่านทะเบียน (ocr-plate) → บันทึก (source = esp32; ถ้า AI ไม่แน่ใจจะเป็น “ต้องตรวจสอบ”) → ส่ง Telegram พร้อมปุ่ม “ดูข้อมูลรถ” (`/#v=<id>`)
+
+1. เว็บ: ตั้งค่า → กล้อง ESP32-CAM → “+ เพิ่มกล้อง” → ใส่ Wi-Fi → ดาวน์โหลด `docksense_cam.ino`
+2. Arduino IDE: Board “AI Thinker ESP32-CAM” → อัปโหลด (ต้นฉบับเทมเพลตอยู่ที่ `esp32/docksense_cam.ino`)
+3. ไฟแดงบนบอร์ด: กะพริบ 1 ครั้ง = ส่งสำเร็จ · 4 ครั้ง = ไม่สำเร็จ

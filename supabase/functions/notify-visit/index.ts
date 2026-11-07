@@ -11,6 +11,7 @@ const cors = {
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const TZ = "Asia/Bangkok";
+const SITE = Deno.env.get("SITE_URL") || "https://docksense-al.vercel.app";
 
 async function tg(token: string, method: string, payload: Record<string, unknown>) {
   const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -32,10 +33,17 @@ Deno.serve(async (req) => {
     const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     // ตรวจผู้เรียก (verify_jwt เปิดอยู่แล้ว) และอ่านสิทธิ์จาก profiles
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    const { data: u } = await sb.auth.getUser(jwt);
-    if (!u?.user) return json({ error: "Unauthorized" }, 401);
-    const { data: prof } = await sb.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
-    const role = prof?.role;
+    // เรียกจาก Edge Function อื่น (เช่น camera-ingest) ด้วย service role key
+    const isService = jwt === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    let role: string | undefined;
+    if (isService) role = "admin";
+    else {
+      const { data: u } = await sb.auth.getUser(jwt);
+      if (!u?.user) return json({ error: "Unauthorized" }, 401);
+      const { data: prof } = await sb.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
+      role = prof?.role;
+    }
+    const force = isService && body.force === true; // กล้อง: แจ้งทุกครั้งที่ตรวจพบรถ
 
     if (body.ping) {
       const me = await tg(token, "getMe", {});
@@ -72,14 +80,17 @@ Deno.serve(async (req) => {
     const { data: chans } = await sb.from("notification_channels").select("*").eq("type", "telegram").eq("enabled", true);
     const targets = new Map<string, string>();
     for (const c of chans || []) {
-      if (co?.notify_telegram && c.notify_mode === "all") targets.set(c.id, c.target);
+      if ((force || co?.notify_telegram) && c.notify_mode === "all") targets.set(c.id, c.target);
       if ((wl || []).some((w) => !w.channel_id || w.channel_id === c.id)) targets.set(c.id, c.target);
     }
     if (!targets.size) return json({ skipped: "no_match" });
 
     const when = new Intl.DateTimeFormat("th-TH", { timeZone: TZ, dateStyle: "medium", timeStyle: "short" }).format(new Date(v.capture_at));
+    const link = v.vehicle_id ? `${SITE}/#v=${v.vehicle_id}` : `${SITE}/#t=history`;
+    const reply_markup = { inline_keyboard: [[{ text: "🔎 ดูข้อมูลรถ", url: link }]] };
     const lines = [
-      `🚚 <b>รถเข้าพื้นที่</b>`,
+      `${v.source === "esp32" ? "📷" : "🚚"} <b>รถเข้าพื้นที่</b>${v.source === "esp32" ? " (กล้อง)" : ""}`,
+      v.status === "needs_review" ? `⚠️ <b>AI ไม่แน่ใจ กรุณาตรวจทะเบียนในเว็บ</b>` : "",
       `ทะเบียน: <b>${esc(v.plate_number)}</b>${v.province ? " " + esc(v.province) : ""}`,
       v.company_name ? `บริษัท: <b>${esc(v.company_name)}</b>` : "",
       v.vehicle_type ? `ประเภท: ${esc(v.vehicle_type)}` : "",
@@ -97,9 +108,9 @@ Deno.serve(async (req) => {
       try {
         try {
           if (!photo) throw new Error("no photo");
-          await tg(token, "sendPhoto", { chat_id, photo, caption: lines, parse_mode: "HTML" });
+          await tg(token, "sendPhoto", { chat_id, photo, caption: lines, parse_mode: "HTML", reply_markup });
         } catch {
-          await tg(token, "sendMessage", { chat_id, text: lines, parse_mode: "HTML" });
+          await tg(token, "sendMessage", { chat_id, text: lines, parse_mode: "HTML", reply_markup });
         }
         sent++;
       } catch (e) { errs.push((e as Error).message); }

@@ -257,8 +257,16 @@ async function boot() {
   $("#provs").innerHTML = DS.PROVINCES.map((p) => `<option value="${p}">`).join("");
   $("#fm").innerHTML += MONTHS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
   const y = new Date().getFullYear(); $("#fy").innerHTML += [0,1,2,3,4,5].map((i) => `<option>${y - i}</option>`).join("");
-  loadCompanies(); go("home");
+  loadCompanies(); go("home"); openFromHash();
+  window.addEventListener("hashchange", openFromHash);
   let t; db.channel("rt").on("postgres_changes", { event: "*", schema: "public", table: "vehicle_logs" }, () => { clearTimeout(t); t = setTimeout(() => reload(), 400); }).subscribe();
+}
+// ลิงก์จาก Telegram: #v=<รหัสรถ> เปิดรายละเอียดรถ · #t=history|search|set เปิดแท็บ
+function openFromHash() {
+  const m = location.hash.match(/^#(v|t)=([\w-]+)$/); if (!m) return;
+  history.replaceState(null, "", location.pathname + location.search);
+  if (m[1] === "t" && ["home", "history", "search", "set"].includes(m[2])) go(m[2]);
+  else if (m[1] === "v" && /^[0-9a-f-]{36}$/i.test(m[2])) openVehicle(m[2]);
 }
 document.querySelectorAll("nav.tabs button").forEach((b) => (b.onclick = () => go(b.dataset.t)));
 function go(t) {
@@ -614,14 +622,58 @@ async function loadTelegram() {
   });
 }
 
+
+/* ---------- กล้อง ESP32-CAM ---------- */
+const CAM_URL = window.DS_CONFIG.SUPABASE_URL + "/functions/v1/camera-ingest";
+const CAM_SKETCH = "// DockSense AI \u2014 ESP32-CAM (AI Thinker) \u0e16\u0e48\u0e32\u0e22\u0e23\u0e39\u0e1b\u0e17\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e19\u0e41\u0e25\u0e49\u0e27\u0e2a\u0e48\u0e07\u0e40\u0e02\u0e49\u0e32\u0e23\u0e30\u0e1a\u0e1a\n// \u0e23\u0e30\u0e1a\u0e1a\u0e08\u0e30\u0e2d\u0e48\u0e32\u0e19\u0e17\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e19 \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e43\u0e19\u0e40\u0e27\u0e47\u0e1a \u0e41\u0e25\u0e30\u0e41\u0e08\u0e49\u0e07 Telegram \u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e25\u0e34\u0e07\u0e01\u0e4c\u0e14\u0e39\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e23\u0e16\u0e43\u0e2b\u0e49\u0e2d\u0e31\u0e15\u0e42\u0e19\u0e21\u0e31\u0e15\u0e34\n// Arduino IDE: Board = \"AI Thinker ESP32-CAM\" (\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07 esp32 by Espressif v2.x/3.x)\n\n#include <WiFi.h>\n#include <WiFiClientSecure.h>\n#include <HTTPClient.h>\n#include \"esp_camera.h\"\n\n// ---------- \u0e15\u0e31\u0e49\u0e07\u0e04\u0e48\u0e32 ----------\nconst char* WIFI_SSID  = \"__WIFI_SSID__\";\nconst char* WIFI_PASS  = \"__WIFI_PASS__\";\nconst char* INGEST_URL = \"__URL__\";\nconst char* DEVICE_KEY = \"__KEY__\";\n\n#define PIR_PIN __PIR__                  // \u0e02\u0e32\u0e40\u0e0b\u0e47\u0e19\u0e40\u0e0b\u0e2d\u0e23\u0e4c\u0e15\u0e23\u0e27\u0e08\u0e08\u0e31\u0e1a (PIR/\u0e2d\u0e31\u0e25\u0e15\u0e23\u0e32\u0e42\u0e0b\u0e19\u0e34\u0e01 \u0e02\u0e32 OUT) \u00b7 -1 = \u0e44\u0e21\u0e48\u0e43\u0e0a\u0e49 \u0e16\u0e48\u0e32\u0e22\u0e15\u0e32\u0e21\u0e40\u0e27\u0e25\u0e32\nconst unsigned long INTERVAL_MS = __INTERVAL__;  // \u0e43\u0e0a\u0e49\u0e40\u0e21\u0e37\u0e48\u0e2d PIR_PIN = -1\nconst unsigned long SETTLE_MS   = 700;    // \u0e23\u0e2d\u0e43\u0e2b\u0e49\u0e23\u0e16\u0e40\u0e02\u0e49\u0e32\u0e01\u0e23\u0e2d\u0e1a\u0e2b\u0e25\u0e31\u0e07\u0e40\u0e0b\u0e47\u0e19\u0e40\u0e0b\u0e2d\u0e23\u0e4c\u0e15\u0e23\u0e27\u0e08\u0e1e\u0e1a\nconst unsigned long COOLDOWN_MS = 8000;   // \u0e1e\u0e31\u0e01\u0e2b\u0e25\u0e31\u0e07\u0e2a\u0e48\u0e07\u0e41\u0e15\u0e48\u0e25\u0e30\u0e04\u0e23\u0e31\u0e49\u0e07 (\u0e01\u0e31\u0e19\u0e2a\u0e48\u0e07\u0e23\u0e16\u0e04\u0e31\u0e19\u0e40\u0e14\u0e34\u0e21\u0e0b\u0e49\u0e33)\n\n// ---------- \u0e02\u0e32\u0e01\u0e25\u0e49\u0e2d\u0e07 AI Thinker ----------\n#define PWDN_GPIO_NUM 32\n#define RESET_GPIO_NUM -1\n#define XCLK_GPIO_NUM 0\n#define SIOD_GPIO_NUM 26\n#define SIOC_GPIO_NUM 27\n#define Y9_GPIO_NUM 35\n#define Y8_GPIO_NUM 34\n#define Y7_GPIO_NUM 39\n#define Y6_GPIO_NUM 36\n#define Y5_GPIO_NUM 21\n#define Y4_GPIO_NUM 19\n#define Y3_GPIO_NUM 18\n#define Y2_GPIO_NUM 5\n#define VSYNC_GPIO_NUM 25\n#define HREF_GPIO_NUM 23\n#define PCLK_GPIO_NUM 22\n#define LED_RED 33  // \u0e44\u0e1f\u0e41\u0e14\u0e07\u0e1a\u0e19\u0e1a\u0e2d\u0e23\u0e4c\u0e14 (\u0e15\u0e34\u0e14\u0e40\u0e21\u0e37\u0e48\u0e2d LOW)\n\nvoid blink(int n, int ms = 120) {\n  for (int i = 0; i < n; i++) { digitalWrite(LED_RED, LOW); delay(ms); digitalWrite(LED_RED, HIGH); delay(ms); }\n}\n\nbool initCamera() {\n  camera_config_t c;\n  c.ledc_channel = LEDC_CHANNEL_0; c.ledc_timer = LEDC_TIMER_0;\n  c.pin_d0 = Y2_GPIO_NUM; c.pin_d1 = Y3_GPIO_NUM; c.pin_d2 = Y4_GPIO_NUM; c.pin_d3 = Y5_GPIO_NUM;\n  c.pin_d4 = Y6_GPIO_NUM; c.pin_d5 = Y7_GPIO_NUM; c.pin_d6 = Y8_GPIO_NUM; c.pin_d7 = Y9_GPIO_NUM;\n  c.pin_xclk = XCLK_GPIO_NUM; c.pin_pclk = PCLK_GPIO_NUM; c.pin_vsync = VSYNC_GPIO_NUM; c.pin_href = HREF_GPIO_NUM;\n  c.pin_sccb_sda = SIOD_GPIO_NUM; c.pin_sccb_scl = SIOC_GPIO_NUM;\n  c.pin_pwdn = PWDN_GPIO_NUM; c.pin_reset = RESET_GPIO_NUM;\n  c.xclk_freq_hz = 20000000; c.pixel_format = PIXFORMAT_JPEG;\n  c.frame_size = FRAMESIZE_SXGA;   // 1280x1024 \u0e1e\u0e2d\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e2d\u0e48\u0e32\u0e19\u0e17\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e19\n  c.jpeg_quality = 12; c.fb_count = 2; c.grab_mode = CAMERA_GRAB_LATEST;\n  if (!psramFound()) { c.frame_size = FRAMESIZE_SVGA; c.fb_count = 1; }\n  if (esp_camera_init(&c) != ESP_OK) return false;\n  sensor_t* s = esp_camera_sensor_get();\n  if (s) { s->set_whitebal(s, 1); s->set_exposure_ctrl(s, 1); s->set_gain_ctrl(s, 1); }\n  return true;\n}\n\nvoid connectWifi() {\n  if (WiFi.status() == WL_CONNECTED) return;\n  WiFi.mode(WIFI_STA); WiFi.begin(WIFI_SSID, WIFI_PASS);\n  unsigned long t0 = millis();\n  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(300);\n}\n\nbool captureAndSend() {\n  connectWifi();\n  if (WiFi.status() != WL_CONNECTED) return false;\n  camera_fb_t* fb = esp_camera_fb_get();   // \u0e17\u0e34\u0e49\u0e07\u0e40\u0e1f\u0e23\u0e21\u0e40\u0e01\u0e48\u0e32\u0e17\u0e35\u0e48\u0e04\u0e49\u0e32\u0e07\u0e43\u0e19\u0e1a\u0e31\u0e1f\u0e40\u0e1f\u0e2d\u0e23\u0e4c\n  if (fb) esp_camera_fb_return(fb);\n  fb = esp_camera_fb_get();\n  if (!fb) return false;\n  WiFiClientSecure client; client.setInsecure();\n  HTTPClient http; http.setTimeout(45000);\n  bool ok = false;\n  if (http.begin(client, INGEST_URL)) {\n    http.addHeader(\"Content-Type\", \"image/jpeg\");\n    http.addHeader(\"x-device-key\", DEVICE_KEY);\n    int code = http.POST(fb->buf, fb->len);\n    String body = http.getString();\n    Serial.printf(\"HTTP %d %s\\n\", code, body.c_str());\n    ok = (code == 200);\n    http.end();\n  }\n  esp_camera_fb_return(fb);\n  return ok;\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LED_RED, OUTPUT); digitalWrite(LED_RED, HIGH);\n  if (PIR_PIN >= 0) pinMode(PIR_PIN, INPUT);\n  if (!initCamera()) { Serial.println(\"camera init failed\"); while (true) { blink(3); delay(1000); } }\n  connectWifi();\n  Serial.println(WiFi.status() == WL_CONNECTED ? \"WiFi OK\" : \"WiFi FAILED\");\n  blink(2);\n}\n\nvoid loop() {\n  if (PIR_PIN >= 0) {\n    if (digitalRead(PIR_PIN) != HIGH) { delay(50); return; }\n    delay(SETTLE_MS);\n  } else {\n    delay(INTERVAL_MS);\n  }\n  bool ok = captureAndSend();\n  blink(ok ? 1 : 4, ok ? 400 : 100);   // \u0e01\u0e30\u0e1e\u0e23\u0e34\u0e1a 1 \u0e04\u0e23\u0e31\u0e49\u0e07 = \u0e2a\u0e48\u0e07\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08 \u00b7 4 \u0e04\u0e23\u0e31\u0e49\u0e07 = \u0e2a\u0e48\u0e07\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08\n  if (PIR_PIN >= 0) delay(COOLDOWN_MS);\n}\n";
+function camSetup(d) {
+  const m = DS.modal("ตั้งค่ากล้อง: " + d.name, `<p class="muted">ใส่ชื่อ Wi-Fi ที่กล้องจะใช้ แล้วดาวน์โหลดโค้ด เปิดด้วย Arduino IDE และอัปโหลดลงบอร์ด ESP32-CAM (ใส่รหัสกล้องให้แล้ว)</p>
+  <label>ชื่อ Wi-Fi (2.4 GHz)</label><input id="cwS" autocomplete="off"><label>รหัสผ่าน Wi-Fi</label><input id="cwP" autocomplete="off">
+  <label>ตัวสั่งถ่ายรูป</label><select id="cwM"><option value="pir">เซ็นเซอร์ตรวจจับ (PIR) ต่อขา GPIO 13</option><option value="8000">ถ่ายอัตโนมัติทุก 8 วินาที</option><option value="15000">ถ่ายอัตโนมัติทุก 15 วินาที</option></select>
+  <button id="cwDl" type="button" style="width:100%;margin-top:14px">ดาวน์โหลดโค้ดกล้อง (.ino)</button>
+  <details style="margin-top:14px"><summary class="muted">ดูรหัสกล้อง (ใช้ตั้งค่าเอง)</summary><label>ที่อยู่รับรูป</label><input readonly value="${esc(CAM_URL)}" onclick="this.select()"><label>รหัสกล้อง (เก็บเป็นความลับ)</label><input readonly value="${esc(d.device_key)}" onclick="this.select()"></details>
+  <div class="row" style="margin-top:14px"><button class="ghost" id="cwX" type="button">ปิด</button></div>`);
+  m.querySelector("#cwX").onclick = () => m.remove();
+  m.querySelector("#cwDl").onclick = () => {
+    const mode = m.querySelector("#cwM").value, q = (s) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const code = CAM_SKETCH.replace("__WIFI_SSID__", () => q(m.querySelector("#cwS").value)).replace("__WIFI_PASS__", () => q(m.querySelector("#cwP").value))
+      .replace("__URL__", CAM_URL).replace("__KEY__", d.device_key).replace("__PIR__", mode === "pir" ? "13" : "-1").replace("__INTERVAL__", mode === "pir" ? "8000" : mode);
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([code], { type: "text/plain" })); a.download = "docksense_cam.ino"; a.click();
+    DS.toast("ดาวน์โหลดแล้ว — เปิดไฟล์ด้วย Arduino IDE");
+  };
+}
+async function loadCameras() {
+  const card = $("#camCard"); if (!card) return;
+  if (me.role !== "admin") { card.innerHTML = '<h3>กล้อง ESP32-CAM</h3><p class="muted">เฉพาะผู้ดูแลระบบที่ตั้งค่าได้</p>'; return; }
+  const { data, error } = await db.from("camera_devices").select("*").order("created_at");
+  if (error) { card.innerHTML = '<h3>กล้อง ESP32-CAM</h3>' + errBox(error.message, "loadCameras()"); return; }
+  const ago = (t) => { if (!t) return "ยังไม่เคยส่งรูป"; const s = (Date.now() - new Date(t)) / 1000; return s < 90 ? "ส่งรูปล่าสุดเมื่อกี้" : s < 3600 ? `ส่งรูปล่าสุด ${Math.round(s / 60)} นาทีที่แล้ว` : s < 86400 ? `ส่งรูปล่าสุด ${Math.round(s / 3600)} ชั่วโมงที่แล้ว` : "ส่งรูปล่าสุด " + DS.fmt.dateTime(t); };
+  card.innerHTML = `<h3>กล้อง ESP32-CAM</h3><p class="muted">กล้องถ่ายรูปรถ → ระบบอ่านทะเบียนและบันทึกในเว็บ → ส่ง Telegram พร้อมปุ่มเปิดดูข้อมูลรถ ให้เองทุกครั้ง (กล้องแจ้งทุกคัน ไม่ขึ้นกับสวิตช์บริษัท)</p>
+  ${data.length ? data.map((d) => `<div class="chan" data-id="${esc(d.id)}"><div style="flex:1;min-width:0"><b class="wrapsafe">📷 ${esc(d.name)}</b><div class="muted wrapsafe">${esc(ago(d.last_seen))}${d.last_plate ? " · ล่าสุด " + esc(d.last_plate) : ""}${d.enabled ? "" : " · ปิดอยู่"}</div></div><div class="acts"><button class="ghost camSet" type="button">ตั้งค่า / โค้ดกล้อง</button><button class="ghost camTog" type="button">${d.enabled ? "ปิด" : "เปิด"}</button><button class="ghost camDel" type="button">ลบ</button></div></div>`).join("") : '<div class="empty sm">ยังไม่มีกล้อง กด “+ เพิ่มกล้อง” เพื่อรับรหัสกล้องตัวแรก</div>'}
+  <div class="row" style="margin-top:10px"><button id="camAdd" type="button">+ เพิ่มกล้อง</button></div>`;
+  $("#camAdd").onclick = async (ev) => {
+    const name = (prompt("ตั้งชื่อกล้อง เช่น ประตูหน้า") || "").trim(); if (!name) return;
+    ev.target.disabled = true; const { data: d, error: e } = await db.from("camera_devices").insert({ name }).select("*").single();
+    if (e) { DS.toast(e.message, "error"); ev.target.disabled = false; return; }
+    await loadCameras(); camSetup(d);
+  };
+  card.querySelectorAll(".chan").forEach((el) => {
+    const d = data.find((r) => r.id === el.dataset.id);
+    el.querySelector(".camSet").onclick = () => camSetup(d);
+    el.querySelector(".camTog").onclick = async () => { const { error: e } = await db.from("camera_devices").update({ enabled: !d.enabled }).eq("id", d.id); if (e) DS.toast(e.message, "error"); else loadCameras(); };
+    el.querySelector(".camDel").onclick = async () => { if (!confirm("ลบกล้องนี้? กล้องตัวนี้จะส่งรูปเข้าระบบไม่ได้อีก")) return; const { error: e } = await db.from("camera_devices").delete().eq("id", d.id); if (e) DS.toast(e.message, "error"); else loadCameras(); };
+  });
+}
+
 /* ---------- settings ---------- */
 async function loadSettings() {
   const roleTh = { admin: "ผู้ดูแลระบบ", staff: "เจ้าหน้าที่", viewer: "ผู้ชม" };
   $("#settings").innerHTML = `<div class="card"><h3>บัญชีของฉัน</h3>${esc(me.full_name || "")} · ${esc(me.email || "")}<div class="muted">สิทธิ์: ${roleTh[me.role]}</div></div>
   <div class="card"><h3>การเชื่อมต่อ AI OCR</h3><p class="muted">อ่านป้ายที่ Supabase Edge Function <code>ocr-plate</code> เพื่อไม่ให้ API Key อยู่ในหน้าเว็บ (ดูวิธี deploy ใน README.md)</p><button id="ocrTest">ทดสอบการเชื่อมต่อ</button><div id="ocrRes" style="margin-top:10px"></div></div>
   <div class="card" id="tgCard"><h3>แจ้งเตือน Telegram</h3><div class="muted">กำลังโหลด…</div></div>
+  <div class="card" id="camCard"><h3>กล้อง ESP32-CAM</h3><div class="muted">กำลังโหลด…</div></div>
   <div class="card"><h3>ติดตั้งเป็นแอป</h3><p class="muted">Android: Chrome → เมนู ⋮ → "ติดตั้งแอป" · iPhone: Safari → แชร์ → "เพิ่มไปยังหน้าจอโฮม"</p></div><div id="cos"></div><div id="users"></div>`;
-  loadTelegram();
+  loadTelegram(); loadCameras();
   $("#ocrTest").onclick = async (e) => {
     e.target.disabled = true; const out = $("#ocrRes");
     try { const p = await DS.pingOcr(); out.innerHTML = `<span class="badge ok">✓ เชื่อมต่อสำเร็จ (ผู้ให้บริการ: ${esc(p)})</span>`; }
