@@ -281,6 +281,8 @@ function bindCamHome(list) {
   const l = $("#liveBtn"); if (l) l.onclick = () => liveView();
   const p = $("#phoneBtn"); if (p) p.onclick = phoneCam;
 }
+// supabase-js 2.45 ยังไม่ส่งสิทธิ์ล็อกอินให้ Realtime ตอนเปิดหน้าซ้ำ → ตั้งเองก่อนต่อช่อง private
+async function rtAuth() { try { const { data } = await db.auth.getSession(); if (data && data.session) db.realtime.setAuth(data.session.access_token); } catch (_) {} }
 const b64url = (b) => "data:image/jpeg;base64," + b;
 const blobToDataUrl = (b) => new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(b); });
 
@@ -362,10 +364,11 @@ function liveView(startId) {
     try { sessionStorage.setItem("ds_snap", url); location.href = "scan.html?snap=1"; } catch (e) { DS.toast("ส่งภาพไปหน้าสแกนไม่ได้", "error"); sn.disabled = false; sn.textContent = "📸 ถ่ายทะเบียน"; }
   };
   (async () => {
+    await rtAuth();
     const { data } = await db.from("camera_status").select("*").eq("enabled", true).order("name"); esp = data || [];
     lobby = db.channel("live-lobby", { config: { private: true } });
     const sync = () => { const seen = new Map(); Object.values(lobby.presenceState()).flat().forEach((p) => { if (p.kind === "phone" && p.id) seen.set(p.id, p); }); phones = [...seen.values()]; tabs(); if (!cur) { const p = pickFor(kind, startId); if (p) select(p.id); else tabs(); } else if (!camList().some((c) => c.id === cur.id)) setKind(kind); else tabs(); };
-    lobby.on("presence", { event: "sync" }, sync).on("presence", { event: "leave" }, sync).subscribe((st) => { if (st === "SUBSCRIBED") sync(); });
+    lobby.on("presence", { event: "sync" }, sync).on("presence", { event: "leave" }, sync).subscribe((st, err) => { if (st === "SUBSCRIBED") sync(); if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") { const info = q("#lvInfo"); if (info) info.textContent = "ต่อรายชื่อกล้องมือถือไม่ได้ (" + ((err && err.message) || st) + ") — ลองรีเฟรชหน้า"; } });
     tabs(); const p = pickFor("esp", startId); if (p) select(p.id);
   })();
 }
@@ -398,7 +401,7 @@ async function phoneCam() {
   q("#pcGo").onclick = async () => {
     const go = q("#pcGo"); if (running) return stop();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return DS.toast("เปิดกล้องไม่ได้ (ต้องใช้ HTTPS)", "error");
-    go.disabled = true;
+    go.disabled = true; await rtAuth();
     try { await cam(); } catch (e) { DS.toast(e.name === "NotAllowedError" ? "ไม่ได้รับอนุญาตให้ใช้กล้อง" : "เปิดกล้องไม่ได้", "error"); go.disabled = false; return; }
     const name = (q("#pcName").value || defName).trim().slice(0, 30); q("#pcName").disabled = true;
     try { if (navigator.wakeLock) wl = await navigator.wakeLock.request("screen"); } catch (_) {}
@@ -411,9 +414,9 @@ async function phoneCam() {
       const { error } = await db.storage.from("plate-images").upload(path, blob, { contentType: "image/jpeg", upsert: true });
       if (!error) ch.send({ type: "broadcast", event: "snap_ready", payload: { req, path } });
     });
-    ch.subscribe((st) => { if (st === "SUBSCRIBED") { ch.track({ phone: 1 }); } if (st === "CHANNEL_ERROR") DS.toast("เชื่อมต่อภาพสดไม่ได้", "error"); });
+    ch.subscribe((st, err) => { if (st === "SUBSCRIBED") { ch.track({ phone: 1 }); } if (st === "CHANNEL_ERROR") DS.toast("เชื่อมต่อภาพสดไม่ได้ " + ((err && err.message) || ""), "error"); });
     lobby = db.channel("live-lobby", { config: { private: true, presence: { key: "p-" + id } } });
-    lobby.subscribe((st) => { if (st === "SUBSCRIBED") lobby.track({ kind: "phone", id, name, uid }); });
+    lobby.subscribe((st, err) => { if (st === "SUBSCRIBED") lobby.track({ kind: "phone", id, name, uid }); if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") { const i = q("#pcInfo"); if (i) i.textContent = "ประกาศกล้องให้คนอื่นเห็นไม่ได้ (" + ((err && err.message) || st) + ")"; } });
     running = true; go.disabled = false; go.textContent = "หยุดส่งภาพ"; info();
     document.addEventListener("visibilitychange", async () => { if (!document.hidden && running && !wl && navigator.wakeLock) { try { wl = await navigator.wakeLock.request("screen"); } catch (_) {} } });
     timer = setInterval(async () => {
