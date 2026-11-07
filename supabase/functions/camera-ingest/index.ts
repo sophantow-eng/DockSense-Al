@@ -5,7 +5,7 @@ import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 // รับรูปจาก ESP32-CAM: POST image/jpeg + header x-device-key  →  OCR → บันทึก → แจ้ง Telegram
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "x-device-key, content-type",
+  "Access-Control-Allow-Headers": "x-device-key, x-local-ip, content-type",
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
@@ -29,11 +29,23 @@ Deno.serve(async (req) => {
     // 1) อ่านทะเบียน
     // ภาพตัวอย่างสำหรับหน้าเว็บ “ดูกล้อง” (ไม่อ่านทะเบียน ไม่บันทึกประวัติ)
     if (new URL(req.url).searchParams.get("preview") === "1") {
-      const pv = await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
-      if (pv.error) return json({ error: pv.error.message }, 500);
       const watching = !!dev.watch_until && new Date(dev.watch_until) > new Date();
-      await sb.from("camera_devices").update({ preview_at: new Date().toISOString() }).eq("id", dev.id);
-      return json({ ok: true, watch: watching, next_ms: watching ? 2000 : 15000 });
+      const ip = (req.headers.get("x-local-ip") || "").slice(0, 45);
+      const upd: Record<string, unknown> = { preview_at: new Date().toISOString() };
+      if (ip && ip !== dev.local_ip) upd.local_ip = ip;
+      if (watching) {
+        // มีคนดูอยู่: ส่งภาพเข้า Realtime ให้ทุกคนทันที (ลื่น) ไม่ต้องเขียน Storage ทุกเฟรม
+        const r = await fetch(`${url}/realtime/v1/api/broadcast`, {
+          method: "POST", headers: { apikey: svc, Authorization: `Bearer ${svc}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: [{ topic: `live:${dev.id}`, event: "frame", private: true, payload: { b: encodeBase64(bytes), t: Date.now() } }] }),
+        }).catch(() => null);
+        if (!r || !r.ok) await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
+      } else {
+        const pv = await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
+        if (pv.error) return json({ error: pv.error.message }, 500);
+      }
+      await sb.from("camera_devices").update(upd).eq("id", dev.id);
+      return json({ ok: true, watch: watching, next_ms: watching ? 1000 : 15000 });
     }
 
     const ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {

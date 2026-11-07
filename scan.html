@@ -237,7 +237,10 @@ $("#fType").innerHTML = '<option value="">ไม่ระบุ</option>' + DS.V
   if (!a || !a.profile) { location.href = "index.html"; return; }
   me = a.profile; session = a.session; $("#loading").classList.add("hide");
   if (!DS.can(me, "write")) { $("#denied").classList.remove("hide"); return; }
-  startCam(); show("pick"); loadCompanies();
+  show("pick"); loadCompanies();
+  let snap = null; try { snap = sessionStorage.getItem("ds_snap"); sessionStorage.removeItem("ds_snap"); } catch (_) {}
+  if (snap && /[?&]snap=1/.test(location.search)) { try { const b = await (await fetch(snap)).blob(); toCrop(b); return; } catch (_) {} } // ภาพจากหน้า “ภาพสด” → อ่านทะเบียนทันที
+  startCam();
 })();
 
 /* ---------- กล้อง ---------- */
