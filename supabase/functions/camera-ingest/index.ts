@@ -9,6 +9,8 @@ const cors = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
+const lastWrite = new Map<string, number>(), frameN = new Map<string, number>();
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -19,33 +21,42 @@ Deno.serve(async (req) => {
     if (!key) return json({ error: "missing device key" }, 401);
     const { data: dev } = await sb.from("camera_devices").select("*").eq("device_key", key).eq("enabled", true).maybeSingle();
     if (!dev) return json({ error: "invalid device key" }, 401);
-    await sb.from("camera_devices").update({ last_seen: new Date().toISOString() }).eq("id", dev.id);
+    const isPreview = new URL(req.url).searchParams.get("preview") === "1";
+    const nowMs = Date.now(), due = nowMs - (lastWrite.get(dev.id) || 0) > 5000;
+    if (!isPreview || due) { lastWrite.set(dev.id, nowMs); await sb.from("camera_devices").update({ last_seen: new Date().toISOString() }).eq("id", dev.id); }
 
     const bytes = new Uint8Array(await req.arrayBuffer());
     if (bytes.length < 2000) return json({ error: "image too small" }, 400);
     if (bytes.length > 3_000_000) return json({ error: "image too large" }, 413);
     if (!(bytes[0] === 0xff && bytes[1] === 0xd8)) return json({ error: "JPEG only" }, 415);
 
-    // 1) อ่านทะเบียน
     // ภาพตัวอย่างสำหรับหน้าเว็บ “ดูกล้อง” (ไม่อ่านทะเบียน ไม่บันทึกประวัติ)
-    if (new URL(req.url).searchParams.get("preview") === "1") {
+    if (isPreview) {
       const watching = !!dev.watch_until && new Date(dev.watch_until) > new Date();
       const ip = (req.headers.get("x-local-ip") || "").slice(0, 45);
       const upd: Record<string, unknown> = { preview_at: new Date().toISOString() };
       if (ip && ip !== dev.local_ip) upd.local_ip = ip;
+      const saveStill = () => sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
       if (watching) {
-        // มีคนดูอยู่: ส่งภาพเข้า Realtime ให้ทุกคนทันที (ลื่น) ไม่ต้องเขียน Storage ทุกเฟรม
+        // มีคนดูอยู่: ส่งภาพเข้า Realtime ให้ทุกคนทันที (ช่องชื่อใช้ id กล้อง ซึ่งเห็นได้เฉพาะคนที่ล็อกอิน)
+        const n = (frameN.get(dev.id) || 0) + 1; frameN.set(dev.id, n);
         const r = await fetch(`${url}/realtime/v1/api/broadcast`, {
           method: "POST", headers: { apikey: svc, Authorization: `Bearer ${svc}`, "Content-Type": "application/json" },
           body: JSON.stringify({ messages: [{ topic: `live:${dev.id}`, event: "frame", private: false, payload: { b: encodeBase64(bytes), t: Date.now() } }] }),
         }).catch(() => null);
-        if (!r || !r.ok) await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
+        // เก็บภาพนิ่งสำรองทุก 4 เฟรม (เผื่อ Realtime ใช้ไม่ได้) โดยไม่หน่วงการตอบกลับ
+        if (!r || !r.ok || n % 4 === 0) {
+          const t = saveStill();
+          // deno-lint-ignore no-explicit-any
+          const er = (globalThis as any).EdgeRuntime;
+          if (er?.waitUntil) er.waitUntil(t); else await t;
+        }
       } else {
-        const pv = await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
+        const pv = await saveStill();
         if (pv.error) return json({ error: pv.error.message }, 500);
       }
-      await sb.from("camera_devices").update(upd).eq("id", dev.id);
-      return json({ ok: true, watch: watching, next_ms: watching ? 1000 : 15000 });
+      if (due || upd.local_ip) await sb.from("camera_devices").update(upd).eq("id", dev.id);
+      return json({ ok: true, watch: watching, next_ms: watching ? 300 : 15000 });
     }
 
     const ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {

@@ -35,11 +35,13 @@ const uint32_t SETTLE_MS   = 700;            // รอให้รถเข้�
 const uint32_t COOLDOWN_MS = 8000;           // พักหลังอ่านทะเบียนแต่ละครั้ง (กันส่งรถคันเดิมซ้ำ)
 
 const bool     PREVIEW_ENABLED     = true;   // ส่งภาพตัวอย่างเข้าเว็บ (ปุ่ม ดูภาพสด)
-const uint32_t WATCH_INTERVAL_MS   = 1000;   // ความถี่ส่งภาพตอนมีคนเปิดดู (ms) ต่ำสุดแนะนำ 700
+const uint32_t WATCH_INTERVAL_MS   = 250;    // ช่วงพักระหว่างภาพตอนมีคนเปิดดู (ms) — ความเร็วจริงขึ้นกับอินเทอร์เน็ต ปกติ 2–4 ภาพ/วินาที
 
 const framesize_t FRAME_SIZE       = FRAMESIZE_VGA;  // VGA 640x480 (ลอง FRAMESIZE_SVGA ได้ถ้าต้องการภาพละเอียดขึ้น)
 const uint8_t  JPEG_QUALITY        = 80;     // คุณภาพ JPEG ของ OCR / ภาพนิ่ง (0-100)
-const uint8_t  PREVIEW_JPEG_QUALITY = 55;    // คุณภาพภาพสดในเว็บ (ต่ำลง = เล็ก ส่งไว)
+const uint8_t  PREVIEW_JPEG_QUALITY = 55;    // ภาพสดในเว็บ (ใช้ค่านี้แค่ตอนต้องแปลง RGB565) · โหมด JPEG ในตัวใช้ PREVIEW_SENSOR_Q
+const int      PREVIEW_SENSOR_Q    = 24;     // บีบอัดภาพสดให้เล็ก ส่งไว (เลขมาก = ไฟล์เล็กลง ภาพหยาบลง 10–40)
+const int      OCR_SENSOR_Q        = 10;     // ภาพอ่านทะเบียนให้คมชัด (เลขน้อย = คมขึ้น)
 const bool     FLIP_VERTICAL       = false;  // ภาพกลับหัว -> true
 const bool     MIRROR_HORIZONTAL   = false;  // ภาพกลับซ้ายขวา -> true
 // ===============================================================================
@@ -66,6 +68,7 @@ const bool     MIRROR_HORIZONTAL   = false;  // ภาพกลับซ้า�
 #define LED_FLASH_PIN    4   // แฟลชขาว (ปิดไว้)
 
 static bool nativeJpeg = false;
+static int  sensorQ = 12;
 WebServer server(80);
 
 // ---------- LED ----------
@@ -152,6 +155,13 @@ static bool initCamera() {
 static bool captureJpeg(uint8_t** out, size_t* outLen, bool* needFree, uint8_t quality) {
   *out = nullptr; *outLen = 0; *needFree = false;
 
+  if (nativeJpeg) {   // ภาพสดบีบเล็ก / ภาพอ่านทะเบียนคมชัด
+    int want = quality <= PREVIEW_JPEG_QUALITY ? PREVIEW_SENSOR_Q : OCR_SENSOR_Q;
+    if (want != sensorQ) {
+      sensor_t* sn = esp_camera_sensor_get();
+      if (sn) { sn->set_quality(sn, want); sensorQ = want; camera_fb_t* d = esp_camera_fb_get(); if (d) esp_camera_fb_return(d); }
+    }
+  }
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) {
     Serial.println("capture: esp_camera_fb_get() failed");
