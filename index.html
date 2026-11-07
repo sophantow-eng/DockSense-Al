@@ -515,10 +515,16 @@ async function renderCompaniesCard() {
   if (!DS.can(me, "admin")) return;
   await loadCompanies();
   $("#cos").innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">บริษัทขนส่ง</h3><button class="ghost" id="coAdd" style="flex:none">+ เพิ่ม</button></div>
-  <p class="muted">ใส่โลโก้และเลือกสีของแต่ละบริษัท จะแสดงในประวัติและหน้ารายละเอียดรถ ให้เห็นชื่อบริษัทได้ง่าย</p>
-  ${companies.length ? companies.map((c) => `<div class="item" data-id="${esc(c.id)}" style="padding:10px 0;border-top:1px solid var(--line);align-items:center">${coMark(c, 44)}<div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.company_name)}</b><div class="muted">${c.logo_url ? "มีโลโก้แล้ว" : "ยังไม่มีโลโก้ — แตะเพื่อเพิ่ม"}${c.notify_telegram ? " · 🔔 แจ้งเตือน" : ""}</div></div><span class="muted" style="flex:none">แก้ไข ›</span></div>`).join("") : '<div class="empty">ยังไม่มีบริษัท กด “+ เพิ่ม” เพื่อเริ่มต้น</div>'}</div>`;
+  <p class="muted">แตะชื่อบริษัทเพื่อแก้โลโก้และสี · เปิดสวิตช์ด้านขวาเพื่อให้ส่งแจ้งเตือน Telegram เมื่อรถบริษัทนั้นเข้าพื้นที่</p>
+  ${companies.length ? companies.map((c) => `<div class="item" data-id="${esc(c.id)}" style="padding:10px 0;border-top:1px solid var(--line);align-items:center">${coMark(c, 44)}<div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.company_name)}</b><div class="muted">${c.logo_url ? "มีโลโก้แล้ว" : "ยังไม่มีโลโก้"}${c.notify_telegram ? " · 🔔 แจ้งเตือนเปิดอยู่" : " · แจ้งเตือนปิดอยู่"}</div></div><button class="sw" role="switch" aria-label="แจ้งเตือน Telegram" aria-checked="${c.notify_telegram ? "true" : "false"}" data-sw="${esc(c.id)}"></button></div>`).join("") : '<div class="empty">ยังไม่มีบริษัท กด “+ เพิ่ม” เพื่อเริ่มต้น</div>'}</div>`;
   $("#coAdd").onclick = () => companyModal(null);
   $("#cos").querySelectorAll(".item").forEach((el) => (el.onclick = () => companyModal(companies.find((c) => c.id === el.dataset.id))));
+  $("#cos").querySelectorAll(".sw").forEach((b) => (b.onclick = async (ev) => {
+    ev.stopPropagation(); const c = companies.find((x) => x.id === b.dataset.sw), on = !c.notify_telegram; b.disabled = true;
+    const { error } = await db.from("companies").update({ notify_telegram: on }).eq("id", c.id);
+    if (error) { DS.toast(error.message, "error"); b.disabled = false; return; }
+    c.notify_telegram = on; DS.toast(on ? `เปิดแจ้งเตือน ${c.company_name} แล้ว` : `ปิดแจ้งเตือน ${c.company_name} แล้ว`); renderCompaniesCard();
+  }));
 }
 function companyModal(c) {
   let file = null, removeLogo = false, colorSet = !!(c && /^#[0-9a-fA-F]{6}$/.test(c.brand_color || ""));
@@ -570,9 +576,9 @@ async function loadTelegram() {
   const { data: chans, error } = await db.from("notification_channels").select("*").eq("type", "telegram").order("created_at");
   const list = admin && !error ? chans || [] : [];
   card.innerHTML = `<h3>แจ้งเตือน Telegram</h3>
-  <p class="muted">เมื่อรถของบริษัทที่เปิด “แจ้งเตือน” เข้าพื้นที่ ระบบจะส่งทะเบียน บริษัท เวลา และรูปป้ายเข้า Telegram (เปิดได้ที่ ตั้งค่า → บริษัท → แตะชื่อบริษัท)</p>
+  <p class="muted">เมื่อรถของบริษัทที่เปิด “แจ้งเตือน” เข้าพื้นที่ ระบบจะส่งทะเบียน บริษัท เวลา และรูปป้ายเข้า Telegram (เปิดรายบริษัทที่การ์ด “บริษัทขนส่ง” ด้านล่าง)</p>
   <div id="tgBot" style="margin:8px 0"></div>
-  ${admin ? `<div id="tgList">${list.length ? list.map((c) => `<div class="item" data-id="${esc(c.id)}" style="padding:10px 0;border-top:1px solid var(--line);align-items:center"><div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.label || "Telegram")}</b><div class="muted wrapsafe">Chat ID ${esc(c.target)} · ${c.enabled ? "เปิดอยู่" : "ปิดอยู่"}</div></div><button class="ghost tgTest" style="flex:none;min-height:40px">ทดสอบ</button><button class="ghost tgTog" style="flex:none;min-height:40px">${c.enabled ? "ปิด" : "เปิด"}</button><button class="ghost tgDel" style="flex:none;min-height:40px">ลบ</button></div>`).join("") : '<div class="empty">ยังไม่มีปลายทาง — เพิ่มกลุ่มหรือแชต Telegram ด้านล่าง</div>'}</div>
+  ${admin ? `<div id="tgList">${list.length ? list.map((c) => `<div class="chan item" data-id="${esc(c.id)}"><div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.label || "Telegram")}</b><div class="muted wrapsafe">Chat ID ${esc(c.target)} · ${c.enabled ? "🔔 เปิดอยู่" : "ปิดอยู่"}</div></div><div class="acts"><button class="ghost tgTest" type="button">ส่งข้อความทดสอบ</button><button class="ghost tgTog" type="button">${c.enabled ? "ปิด" : "เปิด"}</button><button class="ghost tgDel" type="button">ลบ</button></div></div>`).join("") : '<div class="empty sm">ยังไม่มีปลายทาง — กด “ค้นหา Chat ID” เพื่อเลือกแชตที่ส่งหาบอท</div>'}</div>
   <div class="row" style="margin-top:10px;gap:8px"><button id="tgAdd" type="button">+ เพิ่มปลายทาง</button><button class="ghost" id="tgFind" type="button">ค้นหา Chat ID</button></div>` : '<p class="muted">เฉพาะผู้ดูแลระบบที่ตั้งค่าได้</p>'}`;
   const bot = $("#tgBot");
   try { const { data, error: e } = await db.functions.invoke("notify-visit", { body: { ping: true } }); if (e) throw await DS.fnErr(e); bot.innerHTML = `<span class="badge ok">✓ เชื่อมต่อบอทแล้ว (@${esc(data.bot)})</span>`; }

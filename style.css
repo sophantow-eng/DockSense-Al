@@ -202,3 +202,13 @@ body:has(#login:not(.hide)){background:var(--ink)}
 .alts{display:flex;gap:8px;flex-wrap:wrap}
 .alts .alt{min-height:48px;padding:6px 10px}
 #ocrState.card{padding:14px 16px}
+
+/* switch (แจ้งเตือนรายบริษัท) */
+.sw{flex:none;position:relative;width:52px;height:32px;min-height:32px;padding:0;border-radius:16px;background:var(--line);border:0;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
+.sw[aria-checked=true]{background:var(--brand)}
+.sw[aria-checked=true]::after{transform:translateX(20px)}
+.sw:hover:not(:disabled){background:var(--line)}.sw[aria-checked=true]:hover:not(:disabled){background:var(--brand)}
+.empty.sm{padding:14px 8px}.empty.sm::before{display:none}
+.chan{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.chan .acts{display:flex;gap:6px;width:100%}.chan .acts button{flex:1;min-height:40px;font-size:14px}
