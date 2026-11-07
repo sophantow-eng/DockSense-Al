@@ -59,22 +59,37 @@ void blink(int n, int ms = 120) {
   for (int i = 0; i < n; i++) { digitalWrite(LED_RED, LOW); delay(ms); digitalWrite(LED_RED, HIGH); delay(ms); }
 }
 
+// ลองเริ่มกล้องหลายแบบ (ปกติ → ลดความละเอียด/ความเร็วลง) และบอกรหัส error ใน Serial Monitor
 bool initCamera() {
-  camera_config_t c;
-  c.ledc_channel = LEDC_CHANNEL_0; c.ledc_timer = LEDC_TIMER_0;
-  c.pin_d0 = Y2_GPIO_NUM; c.pin_d1 = Y3_GPIO_NUM; c.pin_d2 = Y4_GPIO_NUM; c.pin_d3 = Y5_GPIO_NUM;
-  c.pin_d4 = Y6_GPIO_NUM; c.pin_d5 = Y7_GPIO_NUM; c.pin_d6 = Y8_GPIO_NUM; c.pin_d7 = Y9_GPIO_NUM;
-  c.pin_xclk = XCLK_GPIO_NUM; c.pin_pclk = PCLK_GPIO_NUM; c.pin_vsync = VSYNC_GPIO_NUM; c.pin_href = HREF_GPIO_NUM;
-  c.pin_sccb_sda = SIOD_GPIO_NUM; c.pin_sccb_scl = SIOC_GPIO_NUM;
-  c.pin_pwdn = PWDN_GPIO_NUM; c.pin_reset = RESET_GPIO_NUM;
-  c.xclk_freq_hz = 20000000; c.pixel_format = PIXFORMAT_JPEG;
-  c.frame_size = FRAMESIZE_SXGA;   // 1280x1024 พอสำหรับอ่านทะเบียน
-  c.jpeg_quality = 12; c.fb_count = 2; c.grab_mode = CAMERA_GRAB_LATEST;
-  if (!psramFound()) { c.frame_size = FRAMESIZE_SVGA; c.fb_count = 1; }
-  if (esp_camera_init(&c) != ESP_OK) return false;
-  sensor_t* s = esp_camera_sensor_get();
-  if (s) { s->set_whitebal(s, 1); s->set_exposure_ctrl(s, 1); s->set_gain_ctrl(s, 1); }
-  return true;
+  for (int attempt = 0; attempt < 3; attempt++) {
+    camera_config_t c;
+    memset(&c, 0, sizeof(c));
+    c.ledc_channel = LEDC_CHANNEL_0; c.ledc_timer = LEDC_TIMER_0;
+    c.pin_d0 = Y2_GPIO_NUM; c.pin_d1 = Y3_GPIO_NUM; c.pin_d2 = Y4_GPIO_NUM; c.pin_d3 = Y5_GPIO_NUM;
+    c.pin_d4 = Y6_GPIO_NUM; c.pin_d5 = Y7_GPIO_NUM; c.pin_d6 = Y8_GPIO_NUM; c.pin_d7 = Y9_GPIO_NUM;
+    c.pin_xclk = XCLK_GPIO_NUM; c.pin_pclk = PCLK_GPIO_NUM; c.pin_vsync = VSYNC_GPIO_NUM; c.pin_href = HREF_GPIO_NUM;
+    c.pin_sccb_sda = SIOD_GPIO_NUM; c.pin_sccb_scl = SIOC_GPIO_NUM;
+    c.pin_pwdn = PWDN_GPIO_NUM; c.pin_reset = RESET_GPIO_NUM;
+    c.pixel_format = PIXFORMAT_JPEG;
+    c.xclk_freq_hz = attempt == 0 ? 20000000 : 10000000;
+    c.jpeg_quality = 12;
+    if (psramFound() && attempt < 2) {
+      c.frame_size = attempt == 0 ? FRAMESIZE_SXGA : FRAMESIZE_SVGA;  // SXGA 1280x1024 พอสำหรับอ่านทะเบียน
+      c.fb_count = 2; c.fb_location = CAMERA_FB_IN_PSRAM; c.grab_mode = CAMERA_GRAB_LATEST;
+    } else {
+      c.frame_size = FRAMESIZE_VGA; c.fb_count = 1; c.fb_location = CAMERA_FB_IN_DRAM; c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    }
+    esp_err_t e = esp_camera_init(&c);
+    if (e == ESP_OK) {
+      Serial.printf("camera OK (แบบที่ %d, PSRAM %s)\n", attempt + 1, psramFound() ? "มี" : "ไม่มี");
+      sensor_t* s = esp_camera_sensor_get();
+      if (s) { s->set_whitebal(s, 1); s->set_exposure_ctrl(s, 1); s->set_gain_ctrl(s, 1); }
+      return true;
+    }
+    Serial.printf("camera init failed 0x%x (แบบที่ %d)\n", (unsigned)e, attempt + 1);
+    esp_camera_deinit(); delay(300);
+  }
+  return false;
 }
 
 void connectWifi() {
@@ -108,10 +123,16 @@ bool captureAndSend() {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); delay(800);
+  Serial.println("\n== DockSense CAM เริ่มทำงาน ==");
   pinMode(LED_RED, OUTPUT); digitalWrite(LED_RED, HIGH);
   if (PIR_PIN >= 0) pinMode(PIR_PIN, INPUT);
-  if (!initCamera()) { Serial.println("camera init failed"); while (true) { blink(3); delay(1000); } }
+  if (!initCamera()) {
+    while (true) {   // 0x105 = ไม่พบกล้อง → ตรวจสายแพกล้อง · 0x101/0x20001 = หน่วยความจำไม่พอ
+      Serial.println("กล้องเริ่มทำงานไม่ได้ — ตรวจสายแพกล้องให้แน่น แล้วกด RST");
+      blink(3); delay(2000);
+    }
+  }
   connectWifi();
   Serial.println(WiFi.status() == WL_CONNECTED ? "WiFi OK" : "WiFi FAILED");
   server.on("/", handleRoot); server.on("/jpg", handleJpg); server.begin();
