@@ -240,3 +240,12 @@ body:has(#login:not(.hide)){background:var(--ink)}
 .uinfo b{display:inline}.uinfo .badge{margin-left:8px;vertical-align:middle}
 .badge.new{background:var(--hv);color:#241a00}
 .steps{padding-left:22px;margin:8px 0}.steps li{margin:6px 0}
+
+/* ดูกล้อง */
+.camrow{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line)}
+.camrow:first-of-type{border-top:0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#9AA7B8;margin-right:6px;vertical-align:middle}
+.dot.on{background:#22C55E;box-shadow:0 0 0 3px rgba(34,197,94,.25)}
+.camwrap{position:relative;border-radius:12px;overflow:hidden;background:#0B1526;min-height:180px}
+.camwrap img{display:block;width:100%;height:auto}
+.camload{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;color:#B8C7DB}

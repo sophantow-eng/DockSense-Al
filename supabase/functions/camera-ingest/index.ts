@@ -27,6 +27,15 @@ Deno.serve(async (req) => {
     if (!(bytes[0] === 0xff && bytes[1] === 0xd8)) return json({ error: "JPEG only" }, 415);
 
     // 1) อ่านทะเบียน
+    // ภาพตัวอย่างสำหรับหน้าเว็บ “ดูกล้อง” (ไม่อ่านทะเบียน ไม่บันทึกประวัติ)
+    if (new URL(req.url).searchParams.get("preview") === "1") {
+      const pv = await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
+      if (pv.error) return json({ error: pv.error.message }, 500);
+      const watching = !!dev.watch_until && new Date(dev.watch_until) > new Date();
+      await sb.from("camera_devices").update({ preview_at: new Date().toISOString() }).eq("id", dev.id);
+      return json({ ok: true, watch: watching, next_ms: watching ? 2000 : 15000 });
+    }
+
     const ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
       method: "POST",
       headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },

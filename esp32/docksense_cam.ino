@@ -119,11 +119,35 @@ void setup() {
   blink(2);
 }
 
+// ส่งภาพตัวอย่างให้หน้าเว็บ “ดูกล้อง” — ปกติทุก 15 วินาที เมื่อมีคนเปิดดูในเว็บจะเร็วขึ้นเป็นทุก ~2 วินาที (เซิร์ฟเวอร์เป็นคนบอก)
+unsigned long nextPreview = 0, previewGap = 15000;
+void postPreview() {
+  previewGap = 15000;
+  if (WiFi.status() != WL_CONNECTED) return;
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (fb) esp_camera_fb_return(fb);
+  fb = esp_camera_fb_get();
+  if (!fb) return;
+  WiFiClientSecure client; client.setInsecure();
+  HTTPClient http; http.setTimeout(15000);
+  if (http.begin(client, String(INGEST_URL) + "?preview=1")) {
+    http.addHeader("Content-Type", "image/jpeg");
+    http.addHeader("x-device-key", DEVICE_KEY);
+    if (http.POST(fb->buf, fb->len) == 200) {
+      String b = http.getString(); int i = b.indexOf("\"next_ms\":");
+      if (i >= 0) previewGap = constrain(b.substring(i + 10).toInt(), 1500, 60000);
+    }
+    http.end();
+  }
+  esp_camera_fb_return(fb);
+}
+
 unsigned long lastShot = 0;
 void waitMs(unsigned long ms) { unsigned long t = millis(); while (millis() - t < ms) { server.handleClient(); delay(10); } }
 
 void loop() {
   server.handleClient();
+  if (millis() >= nextPreview) { postPreview(); nextPreview = millis() + previewGap; }
   if (PIR_PIN >= 0) {
     if (digitalRead(PIR_PIN) != HIGH) { delay(20); return; }
     waitMs(SETTLE_MS);
