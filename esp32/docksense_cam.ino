@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
 #include "esp_camera.h"
 
 // ---------- ตั้งค่า ----------
@@ -36,6 +37,23 @@ const unsigned long COOLDOWN_MS = 8000;   // พักหลังส่งแ�
 #define HREF_GPIO_NUM 23
 #define PCLK_GPIO_NUM 22
 #define LED_RED 33  // ไฟแดงบนบอร์ด (ติดเมื่อ LOW)
+
+WebServer server(80);   // หน้า “ดูภาพสดจากกล้อง” ในวง Wi-Fi เดียวกัน
+const char PAGE[] PROGMEM = R"rawliteral(<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DockSense กล้อง</title>
+<style>body{margin:0;background:#0B1526;color:#fff;font:16px sans-serif;text-align:center}img{width:100%;max-width:900px;display:block;margin:0 auto}p{color:#9fb2c9;padding:0 16px}</style></head>
+<body><p>ภาพสดจากกล้อง DockSense · ปรับมุมให้เห็นป้ายทะเบียนเต็มและตรง</p><img id="v" alt="กำลังโหลดภาพ…"><p id="s"></p>
+<script>var v=document.getElementById("v");function n(){v.src="/jpg?t="+Date.now()}v.onload=function(){setTimeout(n,300)};v.onerror=function(){setTimeout(n,1500)};n()</script></body></html>)rawliteral";
+
+void handleRoot() { server.send_P(200, "text/html; charset=utf-8", PAGE); }
+void handleJpg() {
+  camera_fb_t* fb = esp_camera_fb_get();   // ทิ้งเฟรมเก่า
+  if (fb) esp_camera_fb_return(fb);
+  fb = esp_camera_fb_get();
+  if (!fb) { server.send(503, "text/plain", "camera busy"); return; }
+  server.sendHeader("Cache-Control", "no-store");
+  server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+}
 
 void blink(int n, int ms = 120) {
   for (int i = 0; i < n; i++) { digitalWrite(LED_RED, LOW); delay(ms); digitalWrite(LED_RED, HIGH); delay(ms); }
@@ -96,17 +114,24 @@ void setup() {
   if (!initCamera()) { Serial.println("camera init failed"); while (true) { blink(3); delay(1000); } }
   connectWifi();
   Serial.println(WiFi.status() == WL_CONNECTED ? "WiFi OK" : "WiFi FAILED");
+  server.on("/", handleRoot); server.on("/jpg", handleJpg); server.begin();
+  Serial.print("ดูภาพกล้องที่: http://"); Serial.println(WiFi.localIP());   // เปิดในมือถือ/คอมที่ใช้ Wi-Fi เดียวกัน
   blink(2);
 }
 
+unsigned long lastShot = 0;
+void waitMs(unsigned long ms) { unsigned long t = millis(); while (millis() - t < ms) { server.handleClient(); delay(10); } }
+
 void loop() {
+  server.handleClient();
   if (PIR_PIN >= 0) {
-    if (digitalRead(PIR_PIN) != HIGH) { delay(50); return; }
-    delay(SETTLE_MS);
+    if (digitalRead(PIR_PIN) != HIGH) { delay(20); return; }
+    waitMs(SETTLE_MS);
   } else {
-    delay(INTERVAL_MS);
+    if (millis() - lastShot < INTERVAL_MS) { delay(20); return; }
   }
+  lastShot = millis();
   bool ok = captureAndSend();
   blink(ok ? 1 : 4, ok ? 400 : 100);   // กะพริบ 1 ครั้ง = ส่งสำเร็จ · 4 ครั้ง = ส่งไม่สำเร็จ
-  if (PIR_PIN >= 0) delay(COOLDOWN_MS);
+  if (PIR_PIN >= 0) waitMs(COOLDOWN_MS);
 }
