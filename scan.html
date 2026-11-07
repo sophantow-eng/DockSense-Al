@@ -61,6 +61,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
   <!-- 3 ตรวจสอบ -->
   <section id="s-review" class="hide">
     <img id="pv" class="pv" alt="ภาพป้ายทะเบียน">
+    <div style="text-align:right;margin-top:6px"><button class="ghost" id="rCrop" type="button" style="min-height:36px;font-size:14px;padding:4px 12px">ครอบเฉพาะป้าย ✂️</button></div>
     <div id="ocrState" class="card" style="margin-top:12px"></div>
     <div class="card">
       <label for="fPlate" style="margin-top:0">เลขทะเบียน (เทียบกับภาพป้ายด้านบน)</label><input id="fPlate" class="platein" placeholder="เช่น 1กก 1234" autocomplete="off" autocapitalize="characters" spellcheck="false">
@@ -75,6 +76,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
       <div id="newCoWrap" class="hide"><label>ชื่อบริษัทใหม่</label><input id="fNewCo" maxlength="80" autocomplete="off"></div>
     </div>
     <div id="verWrap" class="card hide"><div class="ds-chk"><input type="checkbox" id="fVerified"><span id="verTxt">ฉันตรวจสอบแล้วว่าเลขทะเบียนและจังหวัดตรงกับภาพ</span></div></div>
+    <label class="autotog"><input type="checkbox" id="autoSw" checked> <span>บันทึกอัตโนมัติเมื่อเป็นรถที่รู้จักและ AI อ่านชัด</span></label>
     <div class="actbar"><button class="ghost" id="rRetake">ถ่ายใหม่</button><button id="rSave">ยืนยันและบันทึก</button></div>
   </section>
 
@@ -264,7 +266,11 @@ $("#shoot").onclick = () => {
 
 /* ---------- ครอป ---------- */
 let r = { x: 0.1, y: 0.3, w: 0.8, h: 0.4 }, drag = null; const MIN = 0.1, cl = (v, a, b) => Math.min(b, Math.max(a, v));
-function toCrop(b) { stopCam(); rawUrl = mk(b); $("#cimg").src = rawUrl; r = { x: 0.1, y: 0.3, w: 0.8, h: 0.4 }; paint(); show("crop"); }
+function toCrop(b, manual) {
+  stopCam(); rawUrl = mk(b); const i = $("#cimg"); r = { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+  i.onload = () => { i.onload = null; paint(); if (manual) show("crop"); else doCrop(true); }; // ปกติข้ามขั้นครอบรูป ส่งภาพเต็มให้ AI อ่านทันที
+  i.src = rawUrl;
+}
 function paint() { const s = $("#crect").style; s.left = r.x * 100 + "%"; s.top = r.y * 100 + "%"; s.width = r.w * 100 + "%"; s.height = r.h * 100 + "%"; }
 $("#crect").addEventListener("pointerdown", (e) => { e.stopPropagation(); e.target.setPointerCapture(e.pointerId); drag = { m: e.target.dataset.m || "move", sx: e.clientX, sy: e.clientY, r: { ...r } }; });
 $("#cbox").addEventListener("pointermove", (e) => {
@@ -283,8 +289,11 @@ function doCrop(full) {
   cv.getContext("2d").drawImage(i, i.naturalWidth * c.x, i.naturalHeight * c.y, sw, sh, 0, 0, cv.width, cv.height);
   cv.toBlob((b) => { blob = b; $("#pv").src = mk(b); ocrRes = null; ["fPlate", "fProv", "fNote"].forEach((x) => ($("#" + x).value = "")); $("#fType").value = ""; resetMatch(); show("review"); runOcr(); }, "image/jpeg", 0.88);
 }
+try { $("#autoSw").checked = autoOn(); } catch (e) {}
+$("#autoSw").onchange = (e) => { try { localStorage.setItem("ds_autosave", e.target.checked ? "1" : "0"); } catch (_) {} if (!e.target.checked) cancelAuto(); };
+$("#rCrop").onclick = () => { cancelAuto(); show("crop"); };
 $("#cOk").onclick = () => doCrop(false); $("#cFull").onclick = () => doCrop(true);
-const retake = () => { show("pick"); startCam(); }; $("#cRetake").onclick = retake; $("#rRetake").onclick = retake; $("#dNext").onclick = retake;
+const retake = () => { cancelAuto(); show("pick"); startCam(); }; $("#cRetake").onclick = retake; $("#rRetake").onclick = retake; $("#dNext").onclick = retake;
 
 /* ---------- บริษัท / จับคู่รถ ---------- */
 const NEW_CO = "__new";
@@ -348,7 +357,32 @@ async function runMatch() {
     $("#retryMatch").onclick = runMatch; return;
   }
   match = data; renderMatch();
+  if (["new_vehicle", "manual"].includes(data.state)) suggestSimilar(seq, plate); else maybeAutoSave();
 }
+
+// แนะนำรถที่ใกล้เคียงกับที่เคยบันทึก (AI อ่านผิดตัวเดียว เช่น 0/O, 1/I, 8/3)
+async function suggestSimilar(seq, plate) {
+  const { data } = await db.rpc("similar_plates", { p_plate: plate, p_province: $("#fProv").value.trim() || null });
+  if (seq !== matchSeq || !data || !data.length) return;
+  const card = $("#matchCard");
+  card.insertAdjacentHTML("beforeend", `<div class="sim"><div class="muted" style="margin:12px 0 6px">ใกล้เคียงกับรถที่เคยบันทึก — ใช่คันนี้ไหม? แตะเพื่อใช้ทะเบียนนี้</div>${data.map((c) => `<button type="button" class="ghost simbtn" data-p="${esc(c.license_plate)}" data-pv="${esc(c.province || "")}"><span class="plate">${esc(c.license_plate)}</span><span class="muted wrapsafe" style="margin-left:8px">${esc(c.province || "")}${c.company_name ? " · " + esc(c.company_name) : ""}</span></button>`).join("")}</div>`);
+  card.querySelectorAll(".simbtn").forEach((b) => (b.onclick = () => { $("#fPlate").value = b.dataset.p; $("#fProv").value = b.dataset.pv; scheduleMatch(); DS.toast("ใช้ทะเบียน " + b.dataset.p, "info"); }));
+}
+
+// บันทึกอัตโนมัติ: เฉพาะรถที่รู้จักและ AI อ่านชัด (ไม่ซ้ำภายในช่วงกันซ้ำ) · ยกเลิกได้ภายใน 3 วินาที
+let autoT = null, autoN = 0;
+const autoOn = () => { try { return localStorage.getItem("ds_autosave") !== "0"; } catch (e) { return true; } };
+function cancelAuto() { clearInterval(autoT); autoT = null; const b = document.getElementById("autoBar"); if (b) b.remove(); }
+function maybeAutoSave() {
+  cancelAuto();
+  const m = match; if (!m || m.state !== "known" || m.recent_visit || !ocrRes || !ocrRes.found || ocrRes.needs_review || humanEdited() || saving) return;
+  const card = $("#matchCard"); card.insertAdjacentHTML("beforeend", '<div id="autoBar" class="autobar"><span id="autoTxt"></span><button type="button" class="ghost" id="autoNo" style="min-height:36px;padding:2px 12px">ยกเลิก</button></div>');
+  autoN = 3; const tick = () => { $("#autoTxt").textContent = `รู้จักรถคันนี้ — จะบันทึกให้อัตโนมัติใน ${autoN}…`; };
+  if (!autoOn()) { $("#autoTxt").textContent = "รู้จักรถคันนี้ — กดบันทึกได้เลย"; $("#autoNo").remove(); return; }
+  tick(); $("#autoNo").onclick = () => { cancelAuto(); card.insertAdjacentHTML("beforeend", ""); DS.toast("ยกเลิกบันทึกอัตโนมัติ — กดบันทึกเมื่อพร้อม", "info"); };
+  autoT = setInterval(() => { autoN--; if (autoN <= 0) { cancelAuto(); if (!$("#rSave").disabled) $("#rSave").click(); } else tick(); }, 1000);
+}
+["fPlate", "fProv", "fNote", "fType", "fCompany"].forEach((id) => { const e = document.getElementById(id); if (e) { e.addEventListener("input", cancelAuto); e.addEventListener("focus", cancelAuto); } });
 
 function renderMatch() {
   const m = match, v = m.vehicle, st = m.stats, card = $("#matchCard");

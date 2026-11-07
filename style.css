@@ -212,3 +212,31 @@ body:has(#login:not(.hide)){background:var(--ink)}
 .empty.sm{padding:14px 8px}.empty.sm::before{display:none}
 .chan{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
 .chan .acts{display:flex;gap:6px;width:100%}.chan .acts button{flex:1;min-height:40px;font-size:14px}
+
+.autobar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--brand) 14%,transparent);color:var(--text);font-weight:600;font-size:15px}
+.autotog{display:flex;gap:10px;align-items:center;margin:14px 2px 0;color:var(--muted);font-size:14px}
+.autotog input{width:22px;min-height:22px;flex:none}
+.simbtn{display:flex;align-items:center;width:100%;justify-content:flex-start;margin-top:6px;text-align:left}
+
+/* segmented control */
+.seg{display:flex;gap:4px;padding:4px;border-radius:14px;background:var(--field);border:1px solid var(--line)}
+.seg button{flex:1;min-height:44px;padding:6px 10px;border-radius:10px;background:transparent;color:var(--muted);font-weight:600;font-size:15px;box-shadow:none;line-height:1.2}
+.seg button:hover:not(:disabled){background:transparent;color:var(--text)}
+.seg button.on{background:var(--brand);color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.seg button:disabled{opacity:1;cursor:default}
+.seg.sm{margin-top:8px}.seg.sm button{min-height:38px;font-size:13px;padding:4px 6px}
+#loginForm .seg{margin-bottom:6px}
+/* greeting + hints */
+.greet{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 14px}
+.greet h2{margin:0;font-size:20px}
+.rolechip{flex:none;padding:4px 12px;border-radius:999px;background:color-mix(in srgb,var(--brand) 14%,transparent);color:var(--brand);font-size:13px;font-weight:600}
+.tip{display:flex;flex-direction:column;gap:2px;margin:0 0 14px;padding:12px 14px;border-radius:14px;background:color-mix(in srgb,var(--hv) 18%,transparent);border:1px solid color-mix(in srgb,var(--hv) 45%,transparent);color:var(--text);text-decoration:none}
+.tip span{color:var(--muted);font-size:14px}
+/* roles / users */
+.roles{display:grid;gap:8px;margin:8px 0 14px}
+.roles div{padding:10px 12px;border-radius:12px;background:var(--field)}
+.roles b{display:block}.roles span{color:var(--muted);font-size:14px}
+.urow{padding:12px 0;border-top:1px solid var(--line)}
+.uinfo b{display:inline}.uinfo .badge{margin-left:8px;vertical-align:middle}
+.badge.new{background:var(--hv);color:#241a00}
+.steps{padding-left:22px;margin:8px 0}.steps li{margin:6px 0}

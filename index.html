@@ -34,15 +34,15 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
 <body>
 <!-- LOGIN -->
 <div id="login" class="wrap hide">
-  <div class="hero"><span class="logo" role="img" aria-label="DockSense AI"></span><h1>DockSense <em>AI</em></h1><p>ถ่ายรูปป้าย ให้ AI อ่าน แล้วกดบันทึก</p></div>
-  <form id="loginForm" class="card">
-    <div id="nameWrap" class="hide"><label for="lname">ชื่อ-นามสกุล</label><input id="lname" autocomplete="name"></div>
-    <label for="lemail" style="margin-top:0">อีเมล</label><input id="lemail" type="email" autocomplete="email" inputmode="email" required>
-    <label for="lpass">รหัสผ่าน (อย่างน้อย 6 ตัว)</label><div class="pw"><input id="lpass" type="password" minlength="6" autocomplete="current-password" required><button type="button" class="eye" id="peye" aria-label="แสดงรหัสผ่าน">แสดง</button></div>
-    <div id="lerr" class="badge bad hide" style="display:block;margin-top:10px;border-radius:10px;padding:8px"></div>
-    <button id="lbtn" style="width:100%;margin-top:14px">เข้าสู่ระบบ</button>
-    <p style="text-align:center;margin:12px 0 0"><a href="#" id="lmode">ยังไม่มีบัญชี? สมัครสมาชิก</a></p>
-    <p class="muted hide" id="lnote" style="text-align:center">ผู้สมัครคนแรกเป็นผู้ดูแลระบบ คนถัดไปเป็นผู้ชม และผู้ดูแลปรับสิทธิ์ได้ภายหลัง</p>
+  <div class="hero"><span class="logo" role="img" aria-label="DockSense AI"></span><h1>DockSense <em>AI</em></h1><p>บันทึกทะเบียนรถเข้าพื้นที่ ง่าย ไม่ต้องจดเอง</p></div>
+  <form id="loginForm" class="card" novalidate>
+    <div class="seg" role="tablist"><button type="button" id="tabIn" class="on" role="tab" aria-selected="true">เข้าสู่ระบบ</button><button type="button" id="tabUp" role="tab" aria-selected="false">สมัครใหม่</button></div>
+    <div id="nameWrap" class="hide"><label for="lname">ชื่อที่ให้แสดง</label><input id="lname" autocomplete="name" placeholder="เช่น สมชาย" maxlength="60"></div>
+    <label for="lemail">อีเมล</label><input id="lemail" type="email" autocomplete="email" inputmode="email" autocapitalize="none" placeholder="name@example.com">
+    <label for="lpass">รหัสผ่าน</label><div class="pw"><input id="lpass" type="password" autocomplete="current-password" placeholder="อย่างน้อย 6 ตัวอักษร"><button type="button" class="eye" id="peye" aria-label="แสดงรหัสผ่าน">แสดง</button></div>
+    <div id="lerr" class="badge bad hide" role="alert" style="display:block;margin-top:12px;border-radius:10px;padding:10px"></div>
+    <button id="lbtn" style="width:100%;margin-top:16px">เข้าสู่ระบบ</button>
+    <p class="muted hide" id="lnote" style="text-align:center;margin:12px 0 0">สมัครแล้วเข้าใช้งานได้ทันที ไม่ต้องรอยืนยันอีเมล</p>
   </form>
 </div>
 
@@ -230,22 +230,72 @@ const errBox = (m, retry) => `<div class="empty">⚠️ เกิดข้อผ
 
 /* ---------- login ---------- */
 let mode = "in";
-$("#lmode").onclick = (e) => { e.preventDefault(); mode = mode === "in" ? "up" : "in";
-  $("#nameWrap").classList.toggle("hide", mode === "in"); $("#lnote").classList.toggle("hide", mode === "in");
-  $("#lbtn").textContent = mode === "in" ? "เข้าสู่ระบบ" : "สมัครสมาชิก"; $("#lmode").textContent = mode === "in" ? "ยังไม่มีบัญชี? สมัครสมาชิก" : "มีบัญชีแล้ว? เข้าสู่ระบบ"; };
+const lastEmail = () => { try { return localStorage.getItem("ds_email") || ""; } catch (e) { return ""; } };
+$("#lemail").value = lastEmail();
+function setMode(m) {
+  mode = m; const up = m === "up";
+  $("#tabIn").classList.toggle("on", !up); $("#tabUp").classList.toggle("on", up);
+  $("#tabIn").setAttribute("aria-selected", String(!up)); $("#tabUp").setAttribute("aria-selected", String(up));
+  $("#nameWrap").classList.toggle("hide", !up); $("#lnote").classList.toggle("hide", !up);
+  $("#lbtn").textContent = up ? "สมัครและเข้าใช้งาน" : "เข้าสู่ระบบ";
+  $("#lpass").autocomplete = up ? "new-password" : "current-password"; $("#lerr").classList.add("hide");
+}
+$("#tabIn").onclick = () => setMode("in"); $("#tabUp").onclick = () => setMode("up");
+const loginErr = (m) => /invalid login/i.test(m) ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง ลองอีกครั้ง หรือกด “สมัครใหม่” ถ้ายังไม่มีบัญชี"
+  : /rate limit/i.test(m) ? "ระบบส่งอีเมลได้จำกัดต่อชั่วโมง กรุณารอสักครู่แล้วลองใหม่ หรือแจ้งผู้ดูแลระบบ"
+  : /already registered|already been registered/i.test(m) ? "อีเมลนี้สมัครไว้แล้ว กด “เข้าสู่ระบบ” แทน"
+  : /not confirmed/i.test(m) ? "ยังไม่ได้ยืนยันอีเมล กรุณากดลิงก์ในอีเมลที่ได้รับ"
+  : /password should be at least|weak/i.test(m) ? "รหัสผ่านสั้นเกินไป ใช้อย่างน้อย 6 ตัวอักษร"
+  : /valid email|invalid format|unable to validate email/i.test(m) ? "รูปแบบอีเมลไม่ถูกต้อง"
+  : /failed to fetch|network/i.test(m) ? "เชื่อมต่ออินเทอร์เน็ตไม่ได้ ตรวจสัญญาณแล้วลองใหม่" : m;
 $("#loginForm").onsubmit = async (e) => {
-  e.preventDefault(); const b = $("#lbtn"); b.disabled = true; $("#lerr").classList.add("hide");
+  e.preventDefault(); const b = $("#lbtn"), err = $("#lerr"); err.classList.add("hide");
+  const email = $("#lemail").value.trim(), password = $("#lpass").value, fail = (t) => { err.textContent = t; err.classList.remove("hide"); };
+  if (!email) return fail("กรอกอีเมลก่อน"); if (!password) return fail("กรอกรหัสผ่านก่อน");
+  if (mode === "up" && password.length < 6) return fail("รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร");
+  const label = b.textContent; b.disabled = true; b.innerHTML = '<span class="spin"></span> กรุณารอสักครู่';
   try {
-    const email = $("#lemail").value.trim(), password = $("#lpass").value;
     if (mode === "in") { const { error } = await db.auth.signInWithPassword({ email, password }); if (error) throw error; }
-    else { const { data, error } = await db.auth.signUp({ email, password, options: { data: { full_name: $("#lname").value } } }); if (error) throw error;
-      if (!data.session) { DS.toast("สมัครสำเร็จ กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ", "info"); $("#lmode").click(); b.disabled = false; return; } }
-    boot();
-  } catch (x) { const el = $("#lerr"); el.textContent = /invalid login/i.test(x.message) ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง" : /rate limit/i.test(x.message) ? "ส่งอีเมลยืนยันบ่อยเกินไป กรุณารอสักครู่ (ประมาณ 1 ชั่วโมง) แล้วลองสมัครใหม่ หรือแจ้งผู้ดูแลระบบ" : /already registered/i.test(x.message) ? "อีเมลนี้สมัครแล้ว กด “เข้าสู่ระบบ” แทน" : /not confirmed/i.test(x.message) ? "ยังไม่ได้ยืนยันอีเมล กรุณากดลิงก์ในอีเมลที่ได้รับ" : x.message; el.classList.remove("hide"); }
-  b.disabled = false;
+    else {
+      const { data, error } = await db.auth.signUp({ email, password, options: { data: { full_name: $("#lname").value.trim() } } }); if (error) throw error;
+      if (!data.session) { const r = await db.auth.signInWithPassword({ email, password }); if (r.error) { setMode("in"); fail("สมัครแล้ว แต่ต้องยืนยันอีเมลก่อน กรุณากดลิงก์ในอีเมลที่ได้รับ"); b.disabled = false; b.textContent = "เข้าสู่ระบบ"; return; } }
+      try { sessionStorage.setItem("ds_welcome", "1"); } catch (_) {}
+    }
+    try { localStorage.setItem("ds_email", email); } catch (_) {}
+    await boot();
+  } catch (x) { fail(loginErr(x.message || String(x))); }
+  b.disabled = false; b.textContent = label;
 };
 $("#outBtn").onclick = async () => { await db.auth.signOut(); location.reload(); };
 $("#themeBtn").onclick = DS.toggleTheme;
+
+/* ---------- ทักทาย / สิทธิ์ ---------- */
+const ROLE_TH = { admin: "ผู้ดูแลระบบ", staff: "เจ้าหน้าที่", viewer: "ผู้ชม" };
+const ROLE_DESC = { admin: "ทำได้ทุกอย่าง: สแกนบันทึก แก้ไข ลบ จัดการบริษัท ผู้ใช้ และการแจ้งเตือน", staff: "สแกนและบันทึกรถ แก้ไขรายการ ค้นหาและดูประวัติ", viewer: "ดูประวัติและค้นหาได้อย่างเดียว (บันทึกไม่ได้)" };
+let newViewers = 0;
+function greeting() {
+  const hr = new Date().getHours(), t = hr < 11 ? "สวัสดีตอนเช้า" : hr < 17 ? "สวัสดีตอนบ่าย" : "สวัสดีตอนเย็น", nm = (me.full_name || "").trim().split(/\s+/)[0];
+  let note = "";
+  if (me.role === "viewer") note = `<div class="tip" id="gHint"><b>คุณดูข้อมูลได้อย่างเดียว</b><span>ถ้าต้องการสแกนและบันทึกรถ ให้บอกผู้ดูแลเปลี่ยนสิทธิ์ของคุณเป็น “เจ้าหน้าที่”</span></div>`;
+  else if (me.role === "admin" && newViewers > 0) note = `<a href="#" class="tip" id="gNew"><b>มีสมาชิกใหม่ ${newViewers} คน เป็นผู้ชม</b><span>แตะเพื่อตั้งสิทธิ์ให้เจ้าหน้าที่ที่ต้องสแกนรถ</span></a>`;
+  return `<div class="greet"><h2>${t}${nm ? " คุณ" + esc(nm) : ""}</h2><span class="rolechip">${ROLE_TH[me.role] || ""}</span></div>${note}`;
+}
+function bindGreeting() { const g = $("#gNew"); if (g) g.onclick = (e) => { e.preventDefault(); go("set"); setTimeout(() => { const u = $("#users"); if (u) u.scrollIntoView({ behavior: "smooth" }); }, 700); }; }
+async function countNewViewers() {
+  if (me.role !== "admin") { newViewers = 0; return; }
+  const since = new Date(Date.now() - 7 * 864e5).toISOString();
+  const { count } = await db.from("profiles").select("id", { count: "exact", head: true }).eq("role", "viewer").gte("created_at", since);
+  newViewers = count || 0;
+}
+function welcomeSheet() {
+  let go1 = false; try { go1 = sessionStorage.getItem("ds_welcome") === "1"; sessionStorage.removeItem("ds_welcome"); } catch (_) {}
+  if (!go1) return;
+  const can = DS.can(me, "write");
+  const m = DS.modal("ยินดีต้อนรับ 👋", `<p><b>บัญชีของคุณพร้อมแล้ว</b> สิทธิ์ตอนนี้: <b>${ROLE_TH[me.role]}</b></p><p class="muted">${ROLE_DESC[me.role]}</p>
+  ${can ? '<ol class="steps"><li>กดปุ่มกล้องมุมขวาล่าง</li><li>ถ่ายป้ายทะเบียนให้เห็นชัด</li><li>ระบบอ่านให้ — ถ้าเป็นรถที่เคยมา จะบันทึกให้เอง</li></ol>' : '<p>ถ้าต้องการสแกนและบันทึกรถ ให้แจ้งผู้ดูแลระบบเปลี่ยนสิทธิ์ของคุณเป็น “เจ้าหน้าที่”</p>'}
+  <button id="wOk" type="button" style="width:100%;margin-top:14px">เริ่มใช้งาน</button>`);
+  m.querySelector("#wOk").onclick = () => m.remove();
+}
 
 /* ---------- boot / tabs ---------- */
 async function boot() {
@@ -257,7 +307,7 @@ async function boot() {
   $("#provs").innerHTML = DS.PROVINCES.map((p) => `<option value="${p}">`).join("");
   $("#fm").innerHTML += MONTHS.map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
   const y = new Date().getFullYear(); $("#fy").innerHTML += [0,1,2,3,4,5].map((i) => `<option>${y - i}</option>`).join("");
-  loadCompanies(); go("home"); openFromHash();
+  await countNewViewers(); loadCompanies(); go("home"); openFromHash(); welcomeSheet();
   window.addEventListener("hashchange", openFromHash);
   let t; db.channel("rt").on("postgres_changes", { event: "*", schema: "public", table: "vehicle_logs" }, () => { clearTimeout(t); t = setTimeout(() => reload(), 400); }).subscribe();
 }
@@ -285,14 +335,14 @@ async function loadHome() {
   const [s, r] = await Promise.all([db.rpc("dashboard_stats"), db.from("visit_details").select("*").order("capture_at", { ascending: false }).limit(8)]);
   if (s.error || r.error) { $("#home").innerHTML = errBox((s.error || r.error).message, "loadHome()"); return; }
   const d = s.data, n = (v) => Number(v).toLocaleString("th-TH");
-  $("#home").innerHTML = `<div class="board"><div class="lbl">รถเข้าวันนี้</div><div class="big">${n(d.today_total)}<small>คัน</small></div><div class="sub">ทะเบียนไม่ซ้ำ <b>${n(d.today_unique)}</b> คัน</div></div>
+  $("#home").innerHTML = greeting() + `<div class="board"><div class="lbl">รถเข้าวันนี้</div><div class="big">${n(d.today_total)}<small>คัน</small></div><div class="sub">ทะเบียนไม่ซ้ำ <b>${n(d.today_unique)}</b> คัน</div></div>
   <div class="chips"><div><b>${n(d.month_total)}</b><span>เดือนนี้</span></div><div><b>${n(d.year_total)}</b><span>ปีนี้</span></div><div><b>${n(d.all_total)}</b><span>ทั้งหมด</span></div></div>
   <div class="card"><div class="row sp" style="align-items:baseline"><h3>รายการล่าสุด</h3><a href="#" id="seeAll" style="flex:none">ดูทั้งหมด</a></div>${r.data.length ? r.data.map(itemHtml).join("") : '<div class="empty">ยังไม่มีรายการ<br>กดปุ่ม “สแกนทะเบียน” เพื่อบันทึกคันแรก</div>'}</div>
   <div class="card"><h3>จำนวนรถรายวัน (30 วัน)</h3>${bars(d.daily)}</div>
   <div class="card"><h3>รายเดือน (12 เดือน)</h3>${bars(d.monthly)}</div>
   <div class="card"><h3>สถิติรายปี</h3>${d.yearly.length ? bars(d.yearly) : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>`;
   $("#seeAll").onclick = (e) => { e.preventDefault(); go("history"); };
-  bindItems($("#home"), r.data);
+  bindItems($("#home"), r.data); bindGreeting();
 }
 /* ---------- บริษัท / โลโก้ ---------- */
 let companies = [];
@@ -668,7 +718,7 @@ async function loadCameras() {
 /* ---------- settings ---------- */
 async function loadSettings() {
   const roleTh = { admin: "ผู้ดูแลระบบ", staff: "เจ้าหน้าที่", viewer: "ผู้ชม" };
-  $("#settings").innerHTML = `<div class="card"><h3>บัญชีของฉัน</h3>${esc(me.full_name || "")} · ${esc(me.email || "")}<div class="muted">สิทธิ์: ${roleTh[me.role]}</div></div>
+  $("#settings").innerHTML = `<div class="card"><h3>บัญชีของฉัน</h3>${esc(me.full_name || "")} · ${esc(me.email || "")}<div class="muted">สิทธิ์: <b>${roleTh[me.role]}</b> — ${ROLE_DESC[me.role]}</div></div>
   <div class="card"><h3>การเชื่อมต่อ AI OCR</h3><p class="muted">อ่านป้ายที่ Supabase Edge Function <code>ocr-plate</code> เพื่อไม่ให้ API Key อยู่ในหน้าเว็บ (ดูวิธี deploy ใน README.md)</p><button id="ocrTest">ทดสอบการเชื่อมต่อ</button><div id="ocrRes" style="margin-top:10px"></div></div>
   <div class="card" id="tgCard"><h3>แจ้งเตือน Telegram</h3><div class="muted">กำลังโหลด…</div></div>
   <div class="card" id="camCard"><h3>กล้อง ESP32-CAM</h3><div class="muted">กำลังโหลด…</div></div>
@@ -681,13 +731,27 @@ async function loadSettings() {
     e.target.disabled = false;
   };
   renderCompaniesCard();
-  if (DS.can(me, "admin")) {
-    const { data, error } = await db.from("profiles").select("*").order("created_at");
-    if (error) return;
-    $("#users").innerHTML = `<div class="card"><h3>จัดการผู้ใช้งานและสิทธิ์</h3>${data.map((u) => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><div style="min-width:0"><b>${esc(u.full_name || "")}</b><div class="muted">${esc(u.email || "")}</div></div>
-      <select data-u="${u.id}" ${u.id === me.id ? "disabled" : ""}>${["admin", "staff", "viewer"].map((r) => `<option value="${r}" ${r === u.role ? "selected" : ""}>${roleTh[r]}</option>`).join("")}</select></div>`).join("")}</div>`;
-    $("#users").querySelectorAll("select").forEach((s) => (s.onchange = async () => { const { error } = await db.from("profiles").update({ role: s.value }).eq("id", s.dataset.u); error ? DS.toast(error.message, "error") : DS.toast("เปลี่ยนสิทธิ์แล้ว"); }));
-  }
+  if (DS.can(me, "admin")) renderUsers();
+}
+async function renderUsers() {
+  const [pr, st] = await Promise.all([db.from("profiles").select("*").order("created_at", { ascending: false }), db.from("app_settings").select("value").eq("key", "signup").maybeSingle()]);
+  if (pr.error) return; const data = pr.data, defRole = (st.data && st.data.value && st.data.value.default_role) || "viewer", week = Date.now() - 7 * 864e5;
+  $("#users").innerHTML = `<div class="card"><h3>ผู้ใช้งานและสิทธิ์</h3>
+  <div class="roles">${["admin", "staff", "viewer"].map((r) => `<div><b>${ROLE_TH[r]}</b><span>${ROLE_DESC[r]}</span></div>`).join("")}</div>
+  <label>สมาชิกที่สมัครใหม่ จะได้สิทธิ์</label>
+  <div class="seg" id="defRole"><button type="button" data-r="viewer" class="${defRole === "viewer" ? "on" : ""}">ผู้ชม (รอผู้ดูแลอนุมัติ)</button><button type="button" data-r="staff" class="${defRole === "staff" ? "on" : ""}">เจ้าหน้าที่ (สแกนได้ทันที)</button></div>
+  <p class="muted" style="margin:6px 0 0">ผู้สมัครคนแรกของระบบเป็นผู้ดูแลเสมอ</p>
+  <div id="ulist">${data.map((u) => `<div class="urow" data-u="${u.id}"><div class="uinfo"><b class="wrapsafe">${esc(u.full_name || u.email || "")}</b>${u.role === "viewer" && new Date(u.created_at) > week ? '<span class="badge new">ใหม่</span>' : ""}<div class="muted wrapsafe">${esc(u.email || "")}</div></div>
+    <div class="seg sm">${["admin", "staff", "viewer"].map((r) => `<button type="button" data-r="${r}" class="${r === u.role ? "on" : ""}" ${u.id === me.id ? "disabled" : ""}>${ROLE_TH[r]}</button>`).join("")}</div></div>`).join("")}</div></div>`;
+  $("#defRole").querySelectorAll("button").forEach((b) => (b.onclick = async () => {
+    const { error } = await db.from("app_settings").upsert({ key: "signup", value: { default_role: b.dataset.r } }); if (error) return DS.toast(error.message, "error");
+    DS.toast(b.dataset.r === "staff" ? "สมาชิกใหม่จะสแกนได้ทันที" : "สมาชิกใหม่จะเป็นผู้ชมก่อน"); renderUsers();
+  }));
+  $("#ulist").querySelectorAll(".urow").forEach((row) => row.querySelectorAll("button").forEach((b) => (b.onclick = async () => {
+    if (b.classList.contains("on")) return;
+    const { error } = await db.from("profiles").update({ role: b.dataset.r }).eq("id", row.dataset.u); if (error) return DS.toast(error.message, "error");
+    DS.toast("ตั้งสิทธิ์เป็น " + ROLE_TH[b.dataset.r] + " แล้ว"); renderUsers();
+  })));
 }
 boot();
 </script>
