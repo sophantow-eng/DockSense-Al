@@ -44,7 +44,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
     <div class="cam"><video id="video" playsinline muted></video><div class="frame"></div><div class="camhint">วางป้ายทะเบียนให้อยู่ในกรอบ</div>
       <div id="camErr" class="hide" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;text-align:center;padding:24px"></div>
       <button class="flip" id="flip" aria-label="สลับกล้อง"><svg class="ico" viewBox="0 0 24 24" style="margin:auto"><path d="M4 8h12l-3-3M20 16H8l3 3"/></svg></button><button class="shutter" id="shoot" aria-label="ถ่ายภาพ"></button></div>
-    <div class="tips"><span>ถ่ายตรงหน้าป้าย</span><span>แสงพอ ไม่เงาสะท้อน</span><span>เห็นป้ายเต็มกรอบ</span></div>
+    <div class="tips"><span>ถ่ายตรงป้าย</span><span>แสงพอ ไม่สะท้อน</span><span>เห็นป้ายเต็ม</span></div>
     <div class="grid g2">
       <label class="btn ghost" style="margin:0;color:var(--text);font-size:15px"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/></svg>เลือกจากคลังภาพ<input id="gal" type="file" accept="image/*" class="hide"></label>
       <label class="btn ghost" style="margin:0;color:var(--text);font-size:15px"><svg class="ico" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12.5" r="3.5"/></svg>ใช้กล้องของเครื่อง<input id="nat" type="file" accept="image/*" capture="environment" class="hide"></label>
