@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
         // มีคนดูอยู่: ส่งภาพเข้า Realtime ให้ทุกคนทันที (ลื่น) ไม่ต้องเขียน Storage ทุกเฟรม
         const r = await fetch(`${url}/realtime/v1/api/broadcast`, {
           method: "POST", headers: { apikey: svc, Authorization: `Bearer ${svc}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: [{ topic: `live:${dev.id}`, event: "frame", private: true, payload: { b: encodeBase64(bytes), t: Date.now() } }] }),
+          body: JSON.stringify({ messages: [{ topic: `live:${dev.id}`, event: "frame", private: false, payload: { b: encodeBase64(bytes), t: Date.now() } }] }),
         }).catch(() => null);
         if (!r || !r.ok) await sb.storage.from("plate-images").upload(`camera/${dev.id}/latest.jpg`, bytes, { contentType: "image/jpeg", upsert: true, cacheControl: "1" });
       } else {

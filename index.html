@@ -293,7 +293,7 @@ function liveView(startId) {
     <div class="row" style="margin-top:10px">${DS.can(me, "write") ? '<button id="lvSnap" type="button" disabled>📸 ถ่ายทะเบียน</button>' : ""}<button class="ghost" id="lvFs" type="button">เต็มจอ</button><button class="ghost" id="lvX" type="button">ปิด</button></div>
     <a id="lvLan" class="muted hide" target="_blank" rel="noopener" style="display:block;margin-top:8px"></a>`);
   const q = (s) => m.querySelector(s);
-  let kind = "esp", esp = [], phones = [], cur = null, ch = null, lobby = null, lastFrame = null, frames = 0, t0 = Date.now(), lastAt = 0, watchT = null, dead = false;
+  let kind = "esp", esp = [], phones = [], cur = null, ch = null, lobby = null, lastFrame = null, frames = 0, t0 = Date.now(), lastAt = 0, watchT = null, lobbyT = null, dead = false;
   const camList = () => [...esp.map((c) => ({ id: c.id, name: c.name, kind: "esp", on: camOn(c), ip: c.local_ip })), ...phones.map((p) => ({ id: p.id, name: p.name, kind: "phone", on: true }))];
   const tabs = () => {
     const all = camList(), l = all.filter((c) => c.kind === kind), el = q("#lvTabs"); if (!el) return;
@@ -310,7 +310,7 @@ function liveView(startId) {
   const pickFor = (k, pref) => { const l = camList().filter((c) => c.kind === k); return l.find((c) => c.id === pref) || l.find((c) => c.on) || l[0]; };
   const setKind = (k) => { kind = k; const p = pickFor(k); if (p) select(p.id); else tabs(); };
   q("#lvKind").querySelectorAll("button").forEach((b) => (b.onclick = () => setKind(b.dataset.k)));
-  const close = () => { dead = true; clearInterval(watchT); clearInterval(infoT); if (ch) db.removeChannel(ch); if (lobby) db.removeChannel(lobby); m.remove(); };
+  const close = () => { dead = true; clearInterval(watchT); clearInterval(infoT); clearInterval(lobbyT); if (ch) db.removeChannel(ch); m.remove(); };
   q("#lvX").onclick = close;
   new MutationObserver(() => { if (!m.isConnected && !dead) close(); }).observe(document.body, { childList: true });
   q("#lvFs").onclick = () => { const w = q(".camwrap"); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
@@ -334,7 +334,7 @@ function liveView(startId) {
     const w = q("#lvWait"), i = q("#lvImg"); if (i) i.removeAttribute("src"); if (w) { w.style.display = ""; w.innerHTML = '<span class="spin"></span> กำลังเชื่อมต่อกล้อง…'; }
     const s = q("#lvSnap"); if (s) s.disabled = true; tabs();
     const lan = q("#lvLan"); if (c.kind === "esp" && c.ip) { lan.href = "http://" + c.ip + "/"; lan.textContent = "ภาพลื่นสุด (ต้องต่อ Wi-Fi เดียวกับกล้อง): เปิด http://" + c.ip + "/"; lan.classList.remove("hide"); } else lan.classList.add("hide");
-    ch = db.channel("live:" + c.id, { config: { private: true, broadcast: { self: false }, presence: { key: "v-" + Math.random().toString(36).slice(2, 8) } } });
+    ch = db.channel("live:" + c.id, { config: { broadcast: { self: false }, presence: { key: "v-" + Math.random().toString(36).slice(2, 8) } } });
     ch.on("broadcast", { event: "frame" }, (p) => { if (cur && cur.id === c.id && p.payload && p.payload.b) onFrame(p.payload.b); });
     ch.subscribe((st, err) => {
       if (st === "SUBSCRIBED") ch.track({ v: 1 });
@@ -366,9 +366,14 @@ function liveView(startId) {
   (async () => {
     await rtAuth();
     const { data } = await db.from("camera_status").select("*").eq("enabled", true).order("name"); esp = data || [];
-    lobby = db.channel("live-lobby", { config: { private: true } });
-    const sync = () => { const seen = new Map(); Object.values(lobby.presenceState()).flat().forEach((p) => { if (p.kind === "phone" && p.id) seen.set(p.id, p); }); phones = [...seen.values()]; tabs(); if (!cur) { const p = pickFor(kind, startId); if (p) select(p.id); else tabs(); } else if (!camList().some((c) => c.id === cur.id)) setKind(kind); else tabs(); };
-    lobby.on("presence", { event: "sync" }, sync).on("presence", { event: "leave" }, sync).subscribe((st, err) => { if (st === "SUBSCRIBED") sync(); if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") { const info = q("#lvInfo"); if (info) info.textContent = "ต่อรายชื่อกล้องมือถือไม่ได้ (" + ((err && err.message) || st) + ") — ลองรีเฟรชหน้า"; } });
+    const sync = async () => {
+      if (dead) return;
+      const { data: ph, error } = await db.from("phone_cams").select("id,name,seen_at").gt("seen_at", new Date(Date.now() - 20000).toISOString());
+      if (error) { const info = q("#lvInfo"); if (info) info.textContent = "ดึงรายชื่อกล้องมือถือไม่ได้: " + error.message; return; }
+      phones = (ph || []).map((p) => ({ id: p.id, name: p.name }));
+      if (!cur) { const p = pickFor(kind, startId); if (p) select(p.id); else tabs(); } else if (!camList().some((c) => c.id === cur.id)) setKind(kind); else tabs();
+    };
+    lobbyT = setInterval(sync, 4000); sync();
     tabs(); const p = pickFor("esp", startId); if (p) select(p.id);
   })();
 }
@@ -381,7 +386,7 @@ async function phoneCam() {
     <p class="muted" id="pcInfo" style="margin:8px 0 0"></p>
     <div class="row" style="margin-top:10px"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
   const q = (s) => m.querySelector(s);
-  let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, sent = 0, t0 = Date.now();
+  let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, beatT = null, sent = 0, t0 = Date.now();
   const cv = document.createElement("canvas");
   const grab = (w, qlt) => { const v = q("#pcV"); if (!v.videoWidth) return null; const k = Math.min(1, w / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k); cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height); return cv; };
   async function cam() {
@@ -391,9 +396,9 @@ async function phoneCam() {
   }
   const info = () => { const i = q("#pcInfo"); if (i) i.textContent = !running ? "" : viewers ? `กำลังส่งภาพสด · มีคนดู ${viewers} คน` : "ออนไลน์แล้ว · ยังไม่มีคนเปิดดู (ประหยัดเน็ตอยู่)"; };
   async function stop() {
-    running = false; clearInterval(timer); if (wl) { wl.release().catch(() => {}); wl = null; }
+    running = false; clearInterval(timer); clearInterval(beatT); db.from("phone_cams").delete().eq("id", id).then(() => {}, () => {}); if (wl) { wl.release().catch(() => {}); wl = null; }
     if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
-    if (ch) db.removeChannel(ch); if (lobby) db.removeChannel(lobby); ch = lobby = null; m.remove();
+    if (ch) db.removeChannel(ch); ch = null; m.remove();
   }
   q("#pcX").onclick = stop; addEventListener("pagehide", stop, { once: true });
   new MutationObserver(() => { if (!m.isConnected && running) stop(); }).observe(document.body, { childList: true });
@@ -405,7 +410,7 @@ async function phoneCam() {
     try { await cam(); } catch (e) { DS.toast(e.name === "NotAllowedError" ? "ไม่ได้รับอนุญาตให้ใช้กล้อง" : "เปิดกล้องไม่ได้", "error"); go.disabled = false; return; }
     const name = (q("#pcName").value || defName).trim().slice(0, 30); q("#pcName").disabled = true;
     try { if (navigator.wakeLock) wl = await navigator.wakeLock.request("screen"); } catch (_) {}
-    ch = db.channel("live:" + id, { config: { private: true, broadcast: { self: false }, presence: { key: "phone" } } });
+    ch = db.channel("live:" + id, { config: { broadcast: { self: false }, presence: { key: "phone" } } });
     ch.on("presence", { event: "sync" }, () => { viewers = Object.keys(ch.presenceState()).filter((k) => k !== "phone").length; info(); });
     ch.on("broadcast", { event: "snap" }, async (p) => {
       const req = p.payload && p.payload.req; if (!req) return;
@@ -415,8 +420,8 @@ async function phoneCam() {
       if (!error) ch.send({ type: "broadcast", event: "snap_ready", payload: { req, path } });
     });
     ch.subscribe((st, err) => { if (st === "SUBSCRIBED") { ch.track({ phone: 1 }); } if (st === "CHANNEL_ERROR") DS.toast("เชื่อมต่อภาพสดไม่ได้ " + ((err && err.message) || ""), "error"); });
-    lobby = db.channel("live-lobby", { config: { private: true, presence: { key: "p-" + id } } });
-    lobby.subscribe((st, err) => { if (st === "SUBSCRIBED") lobby.track({ kind: "phone", id, name, uid }); if (st === "CHANNEL_ERROR" || st === "TIMED_OUT") { const i = q("#pcInfo"); if (i) i.textContent = "ประกาศกล้องให้คนอื่นเห็นไม่ได้ (" + ((err && err.message) || st) + ")"; } });
+    const beat = async () => { const { error } = await db.from("phone_cams").upsert({ id, name, seen_at: new Date().toISOString() }); if (error) { const i = q("#pcInfo"); if (i) i.textContent = "ประกาศกล้องให้คนอื่นเห็นไม่ได้: " + error.message; } };
+    await beat(); beatT = setInterval(beat, 6000);
     running = true; go.disabled = false; go.textContent = "หยุดส่งภาพ"; info();
     document.addEventListener("visibilitychange", async () => { if (!document.hidden && running && !wl && navigator.wakeLock) { try { wl = await navigator.wakeLock.request("screen"); } catch (_) {} } });
     timer = setInterval(async () => {
