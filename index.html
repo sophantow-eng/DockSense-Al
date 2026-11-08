@@ -398,10 +398,27 @@ async function phoneCam() {
   let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, beatT = null, autoT = null, sent = 0, t0 = Date.now();
   const cv = document.createElement("canvas");
   const grab = (w, qlt) => { const v = q("#pcV"); if (!v.videoWidth) return null; const k = Math.min(1, w / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k); cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height); return cv; };
+  let flipAt = 0;
   async function cam() {
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
-    const v = q("#pcV"); v.srcObject = stream; await v.play().catch(() => {}); q("#pcW").style.display = "none";
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; q("#pcV").srcObject = null; await new Promise((r) => setTimeout(r, 350)); } // มือถือบางรุ่นต้องรอให้กล้องเดิมปล่อยก่อน
+    const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    const tries = [{ facingMode: { exact: facing }, ...size }, { facingMode: { ideal: facing }, ...size }];
+    let got = null, lastErr = null;
+    for (const v of tries) { try { got = await navigator.mediaDevices.getUserMedia({ video: v, audio: false }); break; } catch (e) { lastErr = e; if (e.name === "NotAllowedError") throw e; } }
+    if (!got) { // ลองเลือกตามชื่อกล้อง (หลัง/หน้า) จากรายการอุปกรณ์
+      try {
+        const ds = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+        const re = facing === "environment" ? /back|rear|environment|หลัง/i : /front|user|face|หน้า/i;
+        const d = ds.find((x) => re.test(x.label)) || (ds.length > 1 ? ds[facing === "environment" ? ds.length - 1 : 0] : ds[0]);
+        if (d) got = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: d.deviceId }, ...size }, audio: false });
+      } catch (e) { lastErr = e; }
+    }
+    if (!got) throw lastErr || new Error("no camera");
+    stream = got;
+    const fm = (got.getVideoTracks()[0].getSettings() || {}).facingMode; if (fm === "user" || fm === "environment") facing = fm;
+    const v = q("#pcV"); v.style.transform = facing === "user" ? "scaleX(-1)" : ""; // กระจกเฉพาะหน้าจอเครื่องนี้ ภาพที่ส่งไม่กลับด้าน
+    v.srcObject = stream; await v.play().catch(() => {}); q("#pcW").style.display = "none"; flipAt = Date.now();
+    const f = q("#pcFlip"); if (f) f.textContent = facing === "user" ? "สลับเป็นกล้องหลัง" : "สลับเป็นกล้องหน้า";
   }
   const info = () => { const i = q("#pcInfo"); if (i) i.textContent = !running ? "" : viewers ? `กำลังส่งภาพสด · มีคนดู ${viewers} คน` : "ออนไลน์แล้ว · ยังไม่มีคนเปิดดู (ประหยัดเน็ตอยู่)"; };
   async function stop() {
@@ -411,7 +428,13 @@ async function phoneCam() {
   }
   q("#pcX").onclick = stop; addEventListener("pagehide", stop, { once: true });
   new MutationObserver(() => { if (!m.isConnected && running) stop(); }).observe(document.body, { childList: true });
-  q("#pcFlip").onclick = async () => { facing = facing === "environment" ? "user" : "environment"; try { await cam(); } catch (e) { DS.toast("สลับกล้องไม่ได้", "error"); } };
+  q("#pcFlip").onclick = async () => {
+    const f = q("#pcFlip"); if (f.disabled) return; f.disabled = true;
+    const old = facing; facing = facing === "environment" ? "user" : "environment";
+    try { await cam(); }
+    catch (e) { facing = old; DS.toast("สลับกล้องไม่ได้ — กลับไปใช้กล้องเดิม", "error"); try { await cam(); } catch (_) { DS.toast("เปิดกล้องไม่ได้ กด “หยุดส่งภาพ” แล้วเริ่มใหม่", "error"); } }
+    f.disabled = false;
+  };
   q("#pcGo").onclick = async () => {
     const go = q("#pcGo"); if (running) return stop();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return DS.toast("เปิดกล้องไม่ได้ (ต้องใช้ HTTPS)", "error");
@@ -454,6 +477,7 @@ async function phoneCam() {
     };
     autoT = setInterval(() => {
       if (!running || ocrBusy || !q("#pcAuto").checked) return; const v = q("#pcV"); if (!v.videoWidth) return;
+      if (Date.now() - flipAt < 2500) { prev = null; changed = false; calm = 0; return; } // เพิ่งสลับกล้อง ไม่นับเป็นรถเข้า
       sctx.drawImage(v, 0, 0, 32, 24); const d = sctx.getImageData(0, 0, 32, 24).data, cur = new Float32Array(768);
       for (let i = 0; i < 768; i++) cur[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11;
       let diff = 0; if (prev) { for (let i = 0; i < 768; i++) diff += Math.abs(cur[i] - prev[i]); diff /= 768; } prev = cur;
@@ -463,7 +487,7 @@ async function phoneCam() {
     }, 600);
     document.addEventListener("visibilitychange", async () => { if (!document.hidden && running && !wl && navigator.wakeLock) { try { wl = await navigator.wakeLock.request("screen"); } catch (_) {} } });
     timer = setInterval(async () => {
-      if (!running || busy || !viewers) return; busy = true;
+      if (!running || busy || !viewers || !stream) return; busy = true;
       try { const c = grab(960); if (c) { await ch.send({ type: "broadcast", event: "frame", payload: { b: c.toDataURL("image/jpeg", 0.6).slice(23), t: Date.now() } }); sent++; } } catch (_) {}
       busy = false;
     }, 170);
