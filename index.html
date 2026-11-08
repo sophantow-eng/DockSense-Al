@@ -858,10 +858,11 @@ async function loadTelegram() {
   const admin = me.role === "admin";
   const { data: chans, error } = await db.from("notification_channels").select("*").eq("type", "telegram").order("created_at");
   const list = admin && !error ? chans || [] : [];
+  const coList = admin ? (await db.from("companies").select("id,company_name").order("company_name")).data || [] : [];
   card.innerHTML = `<h3>แจ้งเตือน Telegram</h3>
   <p class="muted">เมื่อรถของบริษัทที่เปิด “แจ้งเตือน” เข้าพื้นที่ ระบบจะส่งทะเบียน บริษัท เวลา และรูปป้ายเข้า Telegram (เปิดรายบริษัทที่การ์ด “บริษัทขนส่ง” ด้านล่าง)</p>
   <div id="tgBot" style="margin:8px 0"></div>
-  ${admin ? `<div id="tgList">${list.length ? list.map((c) => `<div class="chan item" data-id="${esc(c.id)}"><div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.label || "Telegram")}</b><div class="muted wrapsafe">Chat ID ${esc(c.target)} · ${c.enabled ? "🔔 เปิดอยู่" : "ปิดอยู่"}</div></div><div class="acts"><button class="ghost tgTest" type="button">ส่งข้อความทดสอบ</button><button class="ghost tgTog" type="button">${c.enabled ? "ปิด" : "เปิด"}</button><button class="ghost tgDel" type="button">ลบ</button></div></div>`).join("") : '<div class="empty sm">ยังไม่มีปลายทาง — กด “ค้นหา Chat ID” เพื่อเลือกแชตที่ส่งหาบอท</div>'}</div>
+  ${admin ? `<div id="tgList">${list.length ? list.map((c) => `<div class="chan item" data-id="${esc(c.id)}"><div style="flex:1;min-width:0"><b class="wrapsafe">${esc(c.label || "Telegram")}</b><div class="muted wrapsafe">Chat ID ${esc(c.target)} · ${c.enabled ? "🔔 เปิดอยู่" : "ปิดอยู่"}${c.company_id ? ` · 🏢 ลูกค้า: ${esc((coList.find((x) => x.id === c.company_id) || {}).company_name || "บริษัท")}` : " · ทีมงาน (เห็นทุกบริษัท)"}</div></div><div class="acts"><button class="ghost tgTest" type="button">ส่งข้อความทดสอบ</button><button class="ghost tgTog" type="button">${c.enabled ? "ปิด" : "เปิด"}</button><button class="ghost tgDel" type="button">ลบ</button></div></div>`).join("") : '<div class="empty sm">ยังไม่มีปลายทาง — กด “ค้นหา Chat ID” เพื่อเลือกแชตที่ส่งหาบอท</div>'}</div>
   <div class="row" style="margin-top:10px;gap:8px"><button id="tgAdd" type="button">+ เพิ่มปลายทาง</button><button class="ghost" id="tgFind" type="button">ค้นหา Chat ID</button></div>` : '<p class="muted">เฉพาะผู้ดูแลระบบที่ตั้งค่าได้</p>'}`;
   const bot = $("#tgBot");
   try { const { data, error: e } = await db.functions.invoke("notify-visit", { body: { ping: true } }); if (e) throw await DS.fnErr(e); bot.innerHTML = `<span class="badge ok">✓ เชื่อมต่อบอทแล้ว (@${esc(data.bot)})</span>`; }
@@ -869,12 +870,14 @@ async function loadTelegram() {
   if (!admin) return;
   const addModal = (pre) => {
     const m = DS.modal("เพิ่มปลายทาง Telegram", `<label>ชื่อเรียก (เช่น กลุ่มรปภ.)</label><input id="tgLabel" maxlength="60" value="${esc((pre && pre.title) || "")}"><label>Chat ID</label><input id="tgId" inputmode="numeric" placeholder="เช่น -1001234567890" value="${esc((pre && pre.chat_id) || "")}">
+    <label>ใครอยู่ในแชตนี้</label><select id="tgCo"><option value="">ทีมงานเรา — เห็นรถทุกบริษัท</option>${coList.map((c) => `<option value="${esc(c.id)}">ลูกค้า: ${esc(c.company_name)} — เห็นเฉพาะรถบริษัทนี้</option>`).join("")}</select>
+    <p class="muted" style="margin:4px 0 0">แชตของลูกค้า: ได้รับแจ้งและถามบอทได้เฉพาะรถของบริษัทที่เลือก (ไม่เห็นข้อมูลบริษัทอื่นและไม่เห็นรายการที่ยังรอตรวจสอบ)</p>
     <div class="row" style="margin-top:14px"><button class="ghost" id="tgX" type="button">ยกเลิก</button><button id="tgOk" type="button">บันทึก</button></div>`);
     m.querySelector("#tgX").onclick = () => m.remove();
     m.querySelector("#tgOk").onclick = async (ev) => {
       const target = m.querySelector("#tgId").value.trim(); if (!/^-?\d{5,}$/.test(target)) return DS.toast("Chat ID เป็นตัวเลข เช่น -1001234567890", "error");
       ev.target.disabled = true;
-      const { error: e } = await db.from("notification_channels").insert({ type: "telegram", label: m.querySelector("#tgLabel").value.trim() || "Telegram", target, notify_mode: "all", enabled: true });
+      const { error: e } = await db.from("notification_channels").insert({ type: "telegram", label: m.querySelector("#tgLabel").value.trim() || "Telegram", target, notify_mode: "all", enabled: true, company_id: m.querySelector("#tgCo").value || null });
       if (e) { DS.toast(e.message, "error"); ev.target.disabled = false; return; }
       m.remove(); DS.toast("เพิ่มปลายทางแล้ว — กด “ทดสอบ” เพื่อส่งข้อความลอง"); loadTelegram();
     };
