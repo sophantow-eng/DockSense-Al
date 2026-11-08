@@ -612,18 +612,21 @@ function bindItems(root, list) { DS.hydrateImages(root); root.querySelectorAll("
 async function openVehicle(id) {
   const m = DS.modal("รายละเอียดรถ", spin), body = m.querySelector(".sb");
   const [v, h] = await Promise.all([
-    db.from("vehicles").select("id,license_plate,province,vehicle_type,notes,company_id,created_at,companies(id,company_name,logo_url,brand_color)").eq("id", id).maybeSingle(),
+    db.from("vehicles").select("id,license_plate,province,vehicle_type,brand,model,color,notes,company_id,created_at,companies(id,company_name,logo_url,brand_color)").eq("id", id).maybeSingle(),
     db.from("visit_details").select("*", { count: "exact" }).eq("vehicle_id", id).order("capture_at", { ascending: false }).limit(100)]);
   if (v.error || h.error || !v.data) { body.innerHTML = errBox((v.error || h.error || { message: "ไม่พบรถคันนี้" }).message); return; }
   const x = v.data, hist = h.data, n = h.count || hist.length, co = x.companies, w = DS.can(me, "write");
   body.innerHTML = `<div class="row" style="flex-wrap:wrap"><span class="plate wrapsafe">${esc(x.license_plate)}</span></div>
   <div class="card" style="margin:12px 0"><div class="row" style="justify-content:flex-start;gap:12px">${co ? coMark(co, 56) : ""}<div style="min-width:0"><div class="muted">บริษัทขนส่ง</div>${co ? `<b class="wrapsafe" style="font-size:17px">${esc(co.company_name)}</b>` : '<span class="badge warn">ไม่ระบุบริษัท</span>'}</div></div></div>
   <div class="grid g2"><div><label>จังหวัด</label>${esc(x.province || "-")}</div><div><label>ประเภทรถ</label>${esc(x.vehicle_type || "-")}</div>
+  <div><label>ยี่ห้อ</label>${esc(x.brand || "-")}</div><div><label>รุ่น</label>${esc(x.model || "-")}</div><div><label>สีรถ</label>${esc(x.color || "-")}</div>
   <div><label>เข้ามาทั้งหมด</label>${n.toLocaleString("th-TH")} ครั้ง</div><div><label>ล่าสุด</label>${hist.length ? DS.fmt.dateTime(hist[0].capture_at) : "-"}</div></div>
   ${x.notes ? `<div style="margin-top:8px"><label>หมายเหตุ</label>${esc(x.notes)}</div>` : ""}
   ${w ? `<div class="card" style="margin:12px 0"><b>แก้ไขข้อมูลรถ</b><label>บริษัทขนส่ง</label><select id="vc">${coOptions(x.company_id)}</select>
     <div id="vcn" class="hide"><label>ชื่อบริษัทใหม่</label><input id="vcname" maxlength="80" autocomplete="off"></div>
     <label>ประเภทรถ</label><select id="vt"><option value="">ไม่ระบุ</option>${DS.VEHICLE_TYPES.map((t) => `<option ${t === x.vehicle_type ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <div class="grid g2"><div><label>ยี่ห้อรถ</label><input id="vb" maxlength="40" placeholder="เช่น Isuzu, Toyota" value="${esc(x.brand || "")}"></div><div><label>รุ่น</label><input id="vm" maxlength="40" placeholder="เช่น D-Max, Hilux" value="${esc(x.model || "")}"></div></div>
+    <label>สีรถ</label><input id="vcl" maxlength="30" placeholder="เช่น ขาว, ดำ, แดง" value="${esc(x.color || "")}">
     <label>หมายเหตุ</label><textarea id="vn" rows="2">${esc(x.notes || "")}</textarea><button id="vs" style="width:100%;margin-top:10px">บันทึกข้อมูลรถ</button></div>` : ""}
   <b>ประวัติการเข้าทั้งหมด${n > hist.length ? ` (แสดง ${hist.length} ล่าสุด)` : ""}</b><div style="margin-top:6px">${hist.map(itemHtml).join("")}</div>`;
   bindItems(body, hist);
@@ -637,7 +640,7 @@ async function openVehicle(id) {
           const name = $("#vcname").value.trim(); if (!name) throw new Error("กรุณากรอกชื่อบริษัทใหม่");
           const r = await db.rpc("ds_resolve_company", { p_id: null, p_name: name }); if (r.error) throw r.error; cid = r.data;
         }
-        const { error } = await db.from("vehicles").update({ company_id: cid, vehicle_type: $("#vt").value || null, notes: $("#vn").value.trim() || null }).eq("id", id);
+        const { error } = await db.from("vehicles").update({ company_id: cid, vehicle_type: $("#vt").value || null, brand: $("#vb").value.trim() || null, model: $("#vm").value.trim() || null, color: $("#vcl").value.trim() || null, notes: $("#vn").value.trim() || null }).eq("id", id);
         if (error) throw error;
         DS.toast("บันทึกข้อมูลรถแล้ว"); m.remove(); await loadCompanies(); reload();
       } catch (e) { DS.toast(e.message, "error"); btn.disabled = false; }
