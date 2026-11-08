@@ -74,10 +74,10 @@ Deno.serve(async (req) => {
       return json({ ok: true, watch: watching, snap: wantSnap && !hd, next_ms: watching ? 300 : 15000 });
     }
 
-    // กันอ่านถี่เกิน (ประหยัดโควตา AI): ต่ออุปกรณ์ 1 ครั้งต่อ 6 วินาที
+    // กันอ่านถี่เกิน (ประหยัดโควตา AI): ต่ออุปกรณ์ 1 ครั้งต่อ 30 วินาที (ภาพสดไม่ผ่าน AI จึงไม่กินโควตา)
     {
       const last = lastOcrAt.get(dev.id) || 0;
-      if (Date.now() - last < 6000) return json({ ok: true, skipped: "cooldown" });
+      if (Date.now() - last < 30000) return json({ ok: true, skipped: "cooldown" });
       lastOcrAt.set(dev.id, Date.now());
     }
 

@@ -507,7 +507,7 @@ void loop() {
       }
     }
     if (!trigger && OCR_INTERVAL_MS >= 60000 && (lastOcr == 0 || millis() - lastOcr >= OCR_INTERVAL_MS)) trigger = true;
-    if (trigger && lastOcr != 0 && millis() - lastOcr < 8000) trigger = false;   // อย่าถี่กว่า 8 วินาที (ประหยัดโควตา AI)
+    if (trigger && lastOcr != 0 && millis() - lastOcr < 30000) trigger = false;   // อ่านทะเบียนนานๆ ครั้ง: ไม่ถี่กว่า 30 วินาที (ภาพสดไม่กินโควตา AI)
   }
   if (trigger && WiFi.status() == WL_CONNECTED) {
     lastOcr = millis();
