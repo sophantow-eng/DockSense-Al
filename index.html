@@ -71,6 +71,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
       <button class="ghost hide" id="more" style="width:100%">โหลดเพิ่ม</button>
     </section>
     <section id="t-search" class="hide"><h1>ค้นหาทะเบียน</h1><input id="sq" placeholder="พิมพ์เลขทะเบียน เช่น 1กก1234" style="font-size:17px"><div id="slist" style="margin-top:12px"></div></section>
+    <section id="t-ai" class="hide"><h1>ศูนย์ AI</h1><div id="aic"></div></section>
     <section id="t-set" class="hide"><h1>ตั้งค่าระบบ</h1><div id="settings"></div></section>
   </main>
   <a href="scan.html" id="fab" class="btn fab hide" aria-label="สแกนทะเบียน" title="สแกนทะเบียน"><svg class="ico" viewBox="0 0 24 24"><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/><path d="M7.5 12h9"/></svg>สแกนทะเบียน</a>
@@ -78,6 +79,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
     <button data-t="home" class="on"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5" rx="2"/><rect x="13.5" y="11" width="7.5" height="10" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/></svg>ภาพรวม</button>
     <button data-t="history"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>ประวัติ</button>
     <button data-t="search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>ค้นหา</button>
+    <button data-t="ai"><svg class="ico" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/><path d="M9.5 12h5"/></svg>AI</button>
     <button data-t="set"><svg class="ico" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>ตั้งค่า</button>
   </nav>
 </div>
@@ -575,16 +577,44 @@ async function boot() {
 function openFromHash() {
   const m = location.hash.match(/^#(v|t)=([\w-]+)$/); if (!m) return;
   history.replaceState(null, "", location.pathname + location.search);
-  if (m[1] === "t" && ["home", "history", "search", "set"].includes(m[2])) go(m[2]);
+  if (m[1] === "t" && ["home", "history", "search", "ai", "set"].includes(m[2])) go(m[2]);
   else if (m[1] === "v" && /^[0-9a-f-]{36}$/i.test(m[2])) openVehicle(m[2]);
 }
 document.querySelectorAll("nav.tabs button").forEach((b) => (b.onclick = () => go(b.dataset.t)));
 function go(t) {
   tab = t; document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
-  ["home", "history", "search", "set"].forEach((x) => $("#t-" + x).classList.toggle("hide", x !== t)); reload();
+  ["home", "history", "search", "ai", "set"].forEach((x) => $("#t-" + x).classList.toggle("hide", x !== t)); reload();
 }
-function reload() { ({ home: loadHome, history: () => loadHistory(true), search: loadSearch, set: loadSettings })[tab](); }
+function reload() { ({ home: loadHome, history: () => loadHistory(true), search: loadSearch, ai: loadAI, set: loadSettings })[tab](); }
 
+/* ---------- ศูนย์ AI: สถานะอุปกรณ์ + ผลอ่านทะเบียนจากข้อมูลจริง (ไม่อ้างความแม่นยำ ถ้ายังไม่มีเฉลย) ---------- */
+async function loadAI() {
+  if (!$("#aic").innerHTML) $("#aic").innerHTML = spin;
+  const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const [cs, vl] = await Promise.all([
+    db.from("camera_status").select("*").eq("enabled", true).order("name"),
+    db.from("visit_details").select("*").gte("capture_at", since).order("capture_at", { ascending: false }).limit(1000)]);
+  if (cs.error || vl.error) { $("#aic").innerHTML = errBox((cs.error || vl.error).message, "loadAI()"); return; }
+  const rows = vl.data, n = (v) => Number(v).toLocaleString("th-TH");
+  const review = rows.filter((r) => r.status === "needs_review"), ok = rows.filter((r) => r.status !== "needs_review");
+  const withC = rows.filter((r) => r.ocr_confidence != null && r.ocr_provider), avg = withC.length ? withC.reduce((a, r) => a + Number(r.ocr_confidence), 0) / withC.length : null;
+  const low = withC.filter((r) => Number(r.ocr_confidence) < 0.8).length;
+  const bySrc = {}; rows.forEach((r) => { const k = r.source || "ไม่ระบุ"; bySrc[k] = (bySrc[k] || 0) + 1; });
+  const srcName = { phone: "กล้องมือถือ", camera: "ESP32-CAM", manual: "บันทึกเอง", esp32: "ESP32-CAM" };
+  const devs = cs.data.map((c) => `<div class="camrow"><div style="min-width:0"><b class="wrapsafe">📷 ${esc(c.name)}</b><div class="muted"><span class="dot ${camOn(c) ? "on" : ""}"></span>${camOn(c) ? "ออนไลน์" : "ออฟไลน์"}${c.last_seen ? " · เห็นล่าสุด " + new Date(c.last_seen).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : " · ยังไม่เคยเชื่อมต่อ"}${c.last_plate ? " · ล่าสุด " + esc(c.last_plate) : ""}</div></div></div>`).join("");
+  const off = cs.data.filter((c) => !camOn(c)).length;
+  $("#aic").innerHTML = `<div class="card"><h3>สถานะอุปกรณ์</h3>${devs || '<p class="muted" style="margin:0">ยังไม่มีกล้อง ESP32 ลงทะเบียนไว้</p>'}
+    <p class="muted" style="margin:8px 0 0">${cs.data.length ? (off ? `ออฟไลน์ ${off} จาก ${cs.data.length} ตัว` : "ทุกตัวออนไลน์") : ""} · สถานะเซนเซอร์และ DevKit ยังไม่ถูกส่งเข้าระบบ (รอเฟิร์มแวร์รุ่นถัดไป)</p></div>
+  <div class="chips"><div><b>${n(rows.length)}</b><span>อ่าน 30 วัน</span></div><div><b>${n(review.length)}</b><span>ต้องตรวจสอบ</span></div><div><b>${avg == null ? "-" : Math.round(avg * 100) + "%"}</b><span>ความมั่นใจเฉลี่ย</span></div></div>
+  <div class="card"><h3>ผลการอ่านทะเบียน (30 วัน)</h3>
+    <div class="row sp"><span>รายการที่ผ่าน</span><b>${n(ok.length)}</b></div>
+    <div class="row sp"><span>รออ่านซ้ำ/ตรวจสอบ</span><b>${n(review.length)}</b></div>
+    <div class="row sp"><span>ความมั่นใจต่ำกว่า 80%</span><b>${n(low)}</b></div>
+    ${Object.keys(bySrc).map((k) => `<div class="row sp"><span class="muted">ที่มา: ${esc(srcName[k] || k)}</span><span>${n(bySrc[k])}</span></div>`).join("")}
+    <p class="muted" style="margin:10px 0 0">ตัวเลขนี้คือ “ความมั่นใจที่ AI รายงาน” ไม่ใช่ความแม่นยำจริง การวัดความแม่นยำต้องมีภาพทดสอบที่มีเฉลย (ยังไม่มีในระบบ)</p></div>
+  <div class="card"><h3>คิวตรวจสอบ ${review.length ? `(${n(review.length)})` : ""}</h3>${review.length ? review.slice(0, 20).map(itemHtml).join("") : '<div class="empty">ไม่มีรายการค้าง</div>'}</div>`;
+  bindItems($("#aic"), review);
+}
 /* ---------- home ---------- */
 function bars(data, color) {
   const max = Math.max(1, ...data.map((d) => d.count)), step = Math.ceil(data.length / 6) || 1;
