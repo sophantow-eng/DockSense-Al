@@ -35,6 +35,14 @@ function finalize(r: OcrResult): OcrResult {
   return out;
 }
 
+// แคชผลอ่านตามลายนิ้วมือภาพ: ภาพเดิมส่งซ้ำภายใน 10 นาที (กดซ้ำ/รีไทร์/กล้องส่งเฟรมเดิม) ไม่เรียก AI อีก → ไวและไม่กินโควตา
+const cache = new Map<string, { at: number; r: OcrResult }>();
+const TTL = 10 * 60_000;
+async function imgKey(b64: string) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(b64));
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -53,11 +61,18 @@ Deno.serve(async (req) => {
     if (imageBase64.length > 14_000_000) return json({ error: "Image too large" }, 413);
     const mt = ["image/jpeg", "image/png", "image/webp"].includes(mediaType) ? mediaType : "image/jpeg";
 
+    const key = await imgKey(imageBase64);
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < TTL) return json({ ...hit.r, cached: true });
+
     const errors: string[] = [];
     for (const p of ready) {
       try {
         const result = finalize(await p.read(imageBase64, mt));
-        return json({ ...result, provider: p.name });
+        const out = { ...result, provider: p.name };
+        cache.set(key, { at: Date.now(), r: out });
+        for (const [k, v] of cache) if (cache.size > 60 || Date.now() - v.at > TTL) cache.delete(k); // กันกินหน่วยความจำ
+        return json(out);
       } catch (e) {
         errors.push(`${p.name}: ${e instanceof Error ? e.message : String(e)}`);
         console.error(JSON.stringify({ ev: "ocr_provider_failed", provider: p.name, error: errors[errors.length - 1] }));

@@ -1,12 +1,13 @@
 export interface OcrResult {
+  found: boolean;
   plate: string;
   province: string | null;
   vehicle_type: string | null;
-  confidence: number | null; // 0..1
-  found: boolean;
-  needs_review?: boolean; // true = AI ไม่ชัวร์ ให้ผู้ใช้ตรวจกับภาพก่อนบันทึก
-  alternatives?: string[]; // ผลอ่านอีกแบบที่ไม่ตรงกัน (ให้ผู้ใช้เลือก)
+  confidence: number | null;
+  needs_review?: boolean;
+  alternatives?: string[];
   model?: string;
+  provider?: string;
 }
 export interface OcrProvider {
   name: string;

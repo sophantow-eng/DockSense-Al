@@ -446,7 +446,7 @@ async function phoneCam() {
     ch.on("presence", { event: "sync" }, () => { viewers = Object.keys(ch.presenceState()).filter((k) => k !== "phone").length; info(); });
     ch.on("broadcast", { event: "snap" }, async (p) => {
       const req = p.payload && p.payload.req; if (!req) return;
-      const c = grab(1600); if (!c) return;
+      const c = grab(1280); if (!c) return;
       const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85)); const path = `camera/phone-${id}/snap-${req}.jpg`;
       const { error } = await db.storage.from("plate-images").upload(path, blob, { contentType: "image/jpeg", upsert: true });
       if (!error) ch.send({ type: "broadcast", event: "snap_ready", payload: { req, path } });
@@ -462,7 +462,7 @@ async function phoneCam() {
     const doOcr = async () => {
       ocrBusy = true; lastOcr = Date.now(); say("กำลังอ่านทะเบียน…");
       try {
-        const c = grab(1600); const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.88));
+        const c = grab(1280); const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
         const { data: { session } } = await db.auth.getSession();
         const r = await fetch(CAM_URL + "?name=" + encodeURIComponent(name), { method: "POST", headers: { Authorization: "Bearer " + session.access_token, apikey: window.DS_CONFIG.SUPABASE_KEY, "Content-Type": "image/jpeg" }, body: blob });
         const j = await r.json().catch(() => ({}));

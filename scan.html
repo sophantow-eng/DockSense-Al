@@ -287,7 +287,7 @@ $("#cbox").addEventListener("pointermove", (e) => {
 });
 addEventListener("pointerup", () => (drag = null));
 function doCrop(full) {
-  const i = $("#cimg"), c = full ? { x: 0, y: 0, w: 1, h: 1 } : r, sw = i.naturalWidth * c.w, sh = i.naturalHeight * c.h, k = Math.min(1, 1600 / Math.max(sw, sh));
+  const i = $("#cimg"), c = full ? { x: 0, y: 0, w: 1, h: 1 } : r, sw = i.naturalWidth * c.w, sh = i.naturalHeight * c.h, k = Math.min(1, 1280 / Math.max(sw, sh));
   const cv = document.createElement("canvas"); cv.width = Math.round(sw * k); cv.height = Math.round(sh * k);
   cv.getContext("2d").drawImage(i, i.naturalWidth * c.x, i.naturalHeight * c.y, sw, sh, 0, 0, cv.width, cv.height);
   cv.toBlob((b) => { blob = b; $("#pv").src = mk(b); ocrRes = null; ["fPlate", "fProv", "fNote"].forEach((x) => ($("#" + x).value = "")); $("#fType").value = ""; resetMatch(); show("review"); runOcr(); }, "image/jpeg", 0.88);

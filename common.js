@@ -1,3 +1,7 @@
+// แอปเปิดเร็ว (ดู sw.js) — ลงทะเบียนก่อนโค้ดอื่นเพื่อไม่ให้ล้มตามไลบรารีภายนอก; เฉพาะ https/localhost และไม่ทำให้หน้าล้มถ้าไม่รองรับ
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
 /* DockSense AI — ส่วนที่ใช้ร่วมกัน (index.html + scan.html) */
 (function () {
   const cfg = window.DS_CONFIG || {};

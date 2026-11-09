@@ -2,7 +2,7 @@ import type { OcrProvider, OcrResult } from "./types.ts";
 import { matchProvince, normalizePlate, plateKey, validPlate } from "../plate.ts";
 
 // Gemini ผ่าน Google AI Studio — ตั้ง secret GEMINI_API_KEY เพื่อเปิดใช้
-// อ่านป้าย 2 รอบด้วยวิธีต่างกัน (อ่านรวม + อ่านทีละตัวอักษร) แล้วเทียบกัน เพื่อให้ผลเชื่อถือได้
+// ค่าเริ่มต้น: อ่านรอบเดียวต่อภาพ (ประหยัดโควตา) · ตั้ง secret OCR_DOUBLE=1 เพื่อกลับไปอ่าน 2 รอบเทียบกัน
 // ชื่อโมเดล: ไม่ตายตัว — ลองตามลำดับ (GEMINI_MODEL → รุ่นที่เคยใช้ได้ → ค้นหารุ่น flash ล่าสุดจาก ListModels อัตโนมัติ)
 const API = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_MODELS = ["gemini-3.8-flash", "gemini-flash-latest"];
@@ -29,8 +29,7 @@ ${COMMON}`;
 
 let cachedModel: string | null = null;
 
-// ลดเวลา "คิด" ของโมเดล (อ่านป้ายไม่ต้องใช้การให้เหตุผลยาวๆ) — โมเดลแต่ละตระกูลใช้พารามิเตอร์ต่างกัน
-// ลองตามลำดับ: thinkingLevel (ตระกูล 3.x) → thinkingBudget (2.5) → ไม่ส่ง; ถ้าโมเดลปฏิเสธจะถอยไปแบบถัดไปเองแล้วจำไว้
+// ลดเวลา "คิด" ของโมเดล — ลองตามลำดับ: thinkingLevel (ตระกูล 3.x) → thinkingBudget (2.5) → ไม่ส่ง; ถ้าโมเดลปฏิเสธจะถอยไปแบบถัดไปเองแล้วจำไว้
 const THINK_MODES: (Record<string, unknown> | null)[] = [{ thinkingLevel: "minimal" }, { thinkingBudget: 0 }, null];
 let thinkIdx = 0;
 
@@ -39,7 +38,7 @@ type Call = { ok: true; text: string; model: string } | { ok: false; status: num
 async function call(key: string, model: string, prompt: string, img: string, mt: string): Promise<Call> {
   let last: Call = { ok: false, status: 0, msg: "no attempt" };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const used = thinkIdx; // โหมดที่คำขอนี้ใช้ (สองรอบอ่านขนานกัน จึงต้องจำไว้เพื่อไม่ให้ปรับซ้อนกัน)
+    const used = thinkIdx;
     try {
       const think = THINK_MODES[used];
       const res = await fetch(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
@@ -68,8 +67,8 @@ async function call(key: string, model: string, prompt: string, img: string, mt:
       if (thinkIdx === used && thinkIdx < THINK_MODES.length - 1) thinkIdx++;
       if (thinkIdx !== used) { attempt--; continue; }
     }
-    // ลองซ้ำเฉพาะปัญหาชั่วคราว
-    if (![0, 429, 500, 502, 503, 504].includes(last.status)) break;
+    // ลองซ้ำเฉพาะปัญหาชั่วคราว (ไม่ลองซ้ำเมื่อโควตาเต็ม 429 — ลองซ้ำแล้วก็ยังเต็ม เสียคำขอเปล่า)
+    if (![0, 500, 502, 503, 504].includes(last.status)) break;
     await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
   }
   return last;
@@ -142,12 +141,15 @@ export const geminiProvider: OcrProvider = {
     const key = Deno.env.get("GEMINI_API_KEY");
     if (!key) throw new Error("API_KEY_MISSING: GEMINI_API_KEY is not set in Edge Function secrets");
 
+    const single = Deno.env.get("OCR_DOUBLE") !== "1";   // อ่านรอบเดียว = ใช้โควตาครึ่งเดียว
     const t0 = Date.now();
     const timed = (p: string) => generate(key, p, imageBase64, mediaType).then((v) => ({ ...v, ms: Date.now() - t0 }));
-    const [ra, rb] = await Promise.allSettled([timed(PROMPT_A), timed(PROMPT_B)]);
+    const settled = await Promise.allSettled(single ? [timed(PROMPT_A)] : [timed(PROMPT_A), timed(PROMPT_B)]);
+    const ra = settled[0], rb = settled[1];
     const reads: { r: Raw; model: string }[] = [];
-    const dbg: Record<string, unknown> = { ev: "ocr", total_ms: Date.now() - t0, think: JSON.stringify(THINK_MODES[thinkIdx]) };
+    const dbg: Record<string, unknown> = { ev: "ocr", single, total_ms: Date.now() - t0, think: JSON.stringify(THINK_MODES[thinkIdx]) };
     for (const [tag, x, isB] of [["A", ra, false], ["B", rb, true]] as const) {
+      if (!x) continue;
       if (x.status === "fulfilled") {
         try {
           const r = parse(x.value.text, isB);
@@ -158,7 +160,7 @@ export const geminiProvider: OcrProvider = {
     }
     console.log(JSON.stringify(dbg)); // ดูได้ที่ Supabase → Edge Functions → ocr-plate → Logs
     if (!reads.length) {
-      const err = ra.status === "rejected" ? ra.reason : rb.status === "rejected" ? rb.reason : new Error("OCR returned no JSON");
+      const err = ra.status === "rejected" ? ra.reason : rb && rb.status === "rejected" ? rb.reason : new Error("OCR returned no JSON");
       throw err instanceof Error ? err : new Error(String(err));
     }
 
@@ -179,7 +181,7 @@ export const geminiProvider: OcrProvider = {
     if (!validPlate(plate)) { confidence = Math.min(confidence, 0.5); needsReview = true; }
     else if (agree) confidence = Math.max(confidence, 0.9);
     else if (others.length) { confidence = Math.min(confidence, 0.55); needsReview = true; } // สองรอบอ่านไม่ตรงกัน
-    else if (found.length < 2) { confidence = Math.min(confidence, 0.8); needsReview = true; } // ยืนยันด้วยอีกรอบไม่ได้
+    else if (found.length < 2 && !single) { confidence = Math.min(confidence, 0.8); needsReview = true; } // โหมดอ่าน 2 รอบ แต่ยืนยันด้วยอีกรอบไม่ได้
     if (confidence < 0.75) needsReview = true;
 
     return {

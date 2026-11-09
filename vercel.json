@@ -1,0 +1,9 @@
+{
+  "cleanUrls": false,
+  "headers": [
+    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0" }, { "key": "Service-Worker-Allowed", "value": "/" }] },
+    { "source": "/manifest.webmanifest", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+    { "source": "/(.*)\\.(png|svg)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }] },
+    { "source": "/(.*)", "headers": [{ "key": "Permissions-Policy", "value": "camera=(self), microphone=()" }, { "key": "X-Content-Type-Options", "value": "nosniff" }] }
+  ]
+}

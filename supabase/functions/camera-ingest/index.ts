@@ -9,7 +9,7 @@ const cors = {
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
-const lastWrite = new Map<string, number>(), frameN = new Map<string, number>(), lastOcrAt = new Map<string, number>(), lastPending = new Map<string, number>();
+const lastWrite = new Map<string, number>(), frameN = new Map<string, number>(), lastOcrAt = new Map<string, number>(), lastPending = new Map<string, number>(), lastHash = new Map<string, { h: string; at: number }>();
 // deno-lint-ignore no-explicit-any
 const bg = (p: Promise<any>) => { const er = (globalThis as any).EdgeRuntime; if (er?.waitUntil) { er.waitUntil(p); return Promise.resolve(); } return p; };
 
@@ -74,12 +74,27 @@ Deno.serve(async (req) => {
       return json({ ok: true, watch: watching, snap: wantSnap && !hd, next_ms: watching ? 300 : 15000 });
     }
 
+    // กรองก่อนเรียก AI (ไม่เสียโควตา): เฟรมว่าง/มืด/เลนส์ถูกบัง (ไฟล์เล็กผิดปกติ) และภาพซ้ำเฟรมเดิม
+    if (bytes.length < 9000) return json({ ok: true, skipped: "blank_frame", bytes: bytes.length });
+    {
+      const h = encodeBase64(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).slice(0, 22);
+      const prev = lastHash.get(dev.id);
+      if (prev && prev.h === h && Date.now() - prev.at < 120_000) return json({ ok: true, skipped: "same_frame" });
+      lastHash.set(dev.id, { h, at: Date.now() });
+    }
+
     // กันอ่านถี่เกิน (ประหยัดโควตา AI): ต่ออุปกรณ์ 1 ครั้งต่อ 30 วินาที (ภาพสดไม่ผ่าน AI จึงไม่กินโควตา)
     {
       const last = lastOcrAt.get(dev.id) || 0;
       if (Date.now() - last < 30000) return json({ ok: true, skipped: "cooldown" });
       lastOcrAt.set(dev.id, Date.now());
     }
+
+    // เร่งความเร็ว: อัปโหลดรูป + โหลดเกณฑ์ความมั่นใจ "พร้อมกับ" ที่ AI กำลังอ่าน (ไม่รอต่อคิว)
+    const path = `camera/${dev.id}/${Date.now()}.jpg`;
+    const upP = sb.storage.from("plate-images").upload(path, bytes, { contentType: "image/jpeg" });
+    const thP = sb.from("app_settings").select("value").eq("key", "ocr_thresholds").maybeSingle();
+    const dropLater = () => bg(upP.then(() => sb.storage.from("plate-images").remove([path])).then(() => null, () => null));
 
     const ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
       method: "POST",
@@ -90,30 +105,27 @@ Deno.serve(async (req) => {
     if (!ocrRes.ok) {
       // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
       const lp = lastPending.get(dev.id) || 0;
-      if (Date.now() - lp < 60_000) return json({ ok: true, pending: false, error: ocr.error || "OCR failed", code: ocr.code, skipped: "pending_rate_limit" });
+      if (Date.now() - lp < 60_000) { await dropLater(); return json({ ok: true, pending: false, error: ocr.error || "OCR failed", code: ocr.code, skipped: "pending_rate_limit" }); }
       lastPending.set(dev.id, Date.now());
-      const ppath = `camera/${dev.id}/${Date.now()}.jpg`;
-      const pu = await sb.storage.from("plate-images").upload(ppath, bytes, { contentType: "image/jpeg" });
+      const ppath = path;
+      const pu = await upP;
       if (pu.error) return json({ error: pu.error.message }, 500);
       const { data: pin, error: pe } = await sb.from("vehicle_logs").insert({
         plate_number: "รอตรวจทะเบียน", note: `กล้อง: ${dev.name} — AI อ่านไม่ได้ (${ocr.code || "OCR_FAILED"}) กรุณาดูภาพแล้วพิมพ์ทะเบียน`,
         image_path: ppath, ocr_confidence: 0, status: "needs_review", source: isPhone ? "phone" : "esp32",
       }).select("id").single();
       if (pe) return json({ error: pe.message }, 500);
-      try {
-        await fetch(`${url}/functions/v1/notify-visit`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ visit_id: pin.id, force: true }) });
-      } catch (_) { /* ignore */ }
+      await bg(fetch(`${url}/functions/v1/notify-visit`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ visit_id: pin.id, force: true }) }).catch(() => null));
       return json({ ok: true, pending: true, code: ocr.code || "OCR_FAILED" }, 200);
     }
-    if (!ocr.found || !ocr.plate) return json({ ok: true, found: false });
+    if (!ocr.found || !ocr.plate) { await dropLater(); return json({ ok: true, found: false }); }
 
-    const { data: th } = await sb.from("app_settings").select("value").eq("key", "ocr_thresholds").maybeSingle();
+    const { data: th } = await thP;
     const high = Number(th?.value?.high ?? 0.85);
     const conf = Number(ocr.confidence ?? 0);
 
-    // 2) เก็บรูป
-    const path = `camera/${dev.id}/${Date.now()}.jpg`;
-    const up = await sb.storage.from("plate-images").upload(path, bytes, { contentType: "image/jpeg" });
+    // 2) รูปอัปโหลดไปแล้วระหว่างรอ AI
+    const up = await upP;
     if (up.error) return json({ error: up.error.message }, 500);
     const drop = () => sb.storage.from("plate-images").remove([path]);
 
@@ -143,15 +155,12 @@ Deno.serve(async (req) => {
     }
     if (!isPhone) await sb.from("camera_devices").update({ last_plate: ocr.plate }).eq("id", dev.id);
 
-    // 4) แจ้ง Telegram (ไม่ให้ล้มทั้งงานถ้าส่งไม่สำเร็จ)
-    let notified: unknown = null;
-    try {
-      const n = await fetch(`${url}/functions/v1/notify-visit`, {
-        method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },
-        body: JSON.stringify({ visit_id: visitId, force: true }),
-      });
-      notified = await n.json();
-    } catch (e) { notified = { error: (e as Error).message }; }
+    // 4) แจ้ง Telegram เบื้องหลัง (ตอบกล้องทันที ไม่รอ Telegram; ล้มก็ไม่กระทบการบันทึก)
+    await bg(fetch(`${url}/functions/v1/notify-visit`, {
+      method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },
+      body: JSON.stringify({ visit_id: visitId, force: true }),
+    }).catch(() => null));
+    const notified = "queued";
     return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, notified });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);

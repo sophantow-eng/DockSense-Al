@@ -1,9 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-// แจ้งเตือน Telegram เมื่อรถของบริษัทที่ติดตาม (companies.notify_telegram) หรือทะเบียนใน watchlist เข้าพื้นที่
-// secrets: TELEGRAM_BOT_TOKEN  (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY มีให้อัตโนมัติ)
-// body: { visit_id } | { ping: true } | { test: true, chat_id } | { discover: true }
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -31,9 +28,7 @@ Deno.serve(async (req) => {
     if (!token) return json({ error: "ยังไม่ได้ตั้งค่า TELEGRAM_BOT_TOKEN ใน Edge Function secrets", code: "TOKEN_MISSING" }, 503);
 
     const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    // ตรวจผู้เรียก (verify_jwt เปิดอยู่แล้ว) และอ่านสิทธิ์จาก profiles
     const jwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-    // เรียกจาก Edge Function อื่น (เช่น camera-ingest) ด้วย service role key
     const isService = jwt === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     let role: string | undefined;
     if (isService) role = "admin";
@@ -43,60 +38,68 @@ Deno.serve(async (req) => {
       const { data: prof } = await sb.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
       role = prof?.role;
     }
-    const force = isService && body.force === true; // กล้อง: แจ้งทุกครั้งที่ตรวจพบรถ
+    const force = isService && body.force === true;
 
     if (body.ping) {
       const me = await tg(token, "getMe", {});
       return json({ ok: true, bot: me.username });
     }
 
-    // ผู้ดูแลเท่านั้นที่ทดสอบ/ค้นหา chat id ได้
     if (body.discover || body.test) {
       if (role !== "admin") return json({ error: "เฉพาะผู้ดูแลระบบ", code: "FORBIDDEN" }, 403);
       if (body.discover) {
-        const ups = await tg(token, "getUpdates", { limit: 100, allowed_updates: ["message", "my_chat_member", "channel_post"] });
         const seen = new Map<string, { chat_id: string; title: string; type: string }>();
-        for (const x of ups) {
-          const c = x.message?.chat || x.channel_post?.chat || x.my_chat_member?.chat;
-          if (c) seen.set(String(c.id), { chat_id: String(c.id), type: c.type, title: c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.username || String(c.id) });
-        }
+        const { data: rows } = await sb.from("telegram_seen_chats").select("chat_id,title,type").order("seen_at", { ascending: false }).limit(50);
+        for (const r of rows || []) seen.set(String(r.chat_id), { chat_id: String(r.chat_id), title: r.title || String(r.chat_id), type: r.type || "" });
+        try {
+          const ups = await tg(token, "getUpdates", { limit: 100, allowed_updates: ["message", "my_chat_member", "channel_post"] });
+          for (const x of ups) {
+            const c = x.message?.chat || x.channel_post?.chat || x.my_chat_member?.chat;
+            if (c) seen.set(String(c.id), { chat_id: String(c.id), type: c.type, title: c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.username || String(c.id) });
+          }
+        } catch (_) { /* webhook active */ }
         return json({ chats: [...seen.values()] });
       }
-      await tg(token, "sendMessage", { chat_id: body.chat_id, text: "✅ DockSense AI เชื่อมต่อ Telegram สำเร็จ\nจะแจ้งเตือนที่นี่เมื่อรถของบริษัทที่ติดตามเข้าพื้นที่" });
+      await tg(token, "sendMessage", { chat_id: body.chat_id, text: "✅ DockSense AI เชื่อมต่อ Telegram สำเร็จ\nจะแจ้งเตือนที่นี่เมื่อรถเข้าพื้นที่\nถามบอทได้ เช่น \"บอท ธห 7889 เข้ามาตอนไหน\" (พิมพ์ บอท นำหน้าในกลุ่ม)" });
       return json({ ok: true });
     }
 
     if (!body.visit_id) return json({ error: "visit_id is required" }, 400);
-    if (!["admin", "staff"].includes(role)) return json({ error: "Forbidden", code: "FORBIDDEN" }, 403);
+    if (!["admin", "staff"].includes(role as string)) return json({ error: "Forbidden", code: "FORBIDDEN" }, 403);
 
     const { data: v } = await sb.from("visit_details").select("*").eq("id", body.visit_id).maybeSingle();
     if (!v) return json({ error: "ไม่พบรายการ" }, 404);
     const { data: log } = await sb.from("vehicle_logs").select("notified_at").eq("id", v.id).maybeSingle();
     if (log?.notified_at) return json({ skipped: "already_notified" });
 
-    // เงื่อนไข: บริษัทเปิดแจ้งเตือน หรือทะเบียนอยู่ใน watchlist
     const { data: co } = v.company_id ? await sb.from("companies").select("notify_telegram").eq("id", v.company_id).maybeSingle() : { data: null };
     const { data: wl } = await sb.from("watchlist").select("channel_id,label").eq("plate_norm", v.plate_norm);
     const { data: chans } = await sb.from("notification_channels").select("*").eq("type", "telegram").eq("enabled", true);
-    const targets = new Map<string, string>();
+    // chat_id -> true ถ้าเป็นแชตลูกค้าเท่านั้น (ไม่มีแชตทีมงานที่ chat เดียวกัน)
+    const targets = new Map<string, boolean>();
+    const add = (c: { target: string; company_id?: string | null }) => { const prev = targets.get(c.target); targets.set(c.target, prev === undefined ? !!c.company_id : prev && !!c.company_id); };
     for (const c of chans || []) {
-      if ((force || co?.notify_telegram) && c.notify_mode === "all") targets.set(c.id, c.target);
-      if ((wl || []).some((w) => !w.channel_id || w.channel_id === c.id)) targets.set(c.id, c.target);
+      // แชตลูกค้า: ได้เฉพาะรถของบริษัทตัวเอง และไม่ได้รับรายการที่รอตรวจสอบ
+      if (c.company_id && (c.company_id !== v.company_id || v.status === "needs_review")) continue;
+      if ((force || co?.notify_telegram) && c.notify_mode === "all") add(c);
+      if ((wl || []).some((w) => !w.channel_id || w.channel_id === c.id)) add(c);
     }
     if (!targets.size) return json({ skipped: "no_match" });
 
     const when = new Intl.DateTimeFormat("th-TH", { timeZone: TZ, dateStyle: "medium", timeStyle: "short" }).format(new Date(v.capture_at));
     const link = v.vehicle_id ? `${SITE}/#v=${v.vehicle_id}` : `${SITE}/#t=history`;
     const reply_markup = { inline_keyboard: [[{ text: "🔎 ดูข้อมูลรถ", url: link }]] };
-    const lines = [
-      `${v.source === "esp32" ? "📷" : "🚚"} <b>รถเข้าพื้นที่</b>${v.source === "esp32" ? " (กล้อง)" : ""}`,
-      v.status === "needs_review" ? `⚠️ <b>AI ไม่แน่ใจ กรุณาตรวจทะเบียนในเว็บ</b>` : "",
+    const carTxt = [v.vehicle_brand, v.vehicle_model].filter(Boolean).join(" ") + (v.vehicle_color ? ` (สี${v.vehicle_color})` : "");
+    const head = `${v.source === "esp32" ? "📷" : "🚚"} <b>รถเข้าพื้นที่</b>${v.source === "esp32" ? " (กล้อง)" : ""}`;
+    const core = [
       `ทะเบียน: <b>${esc(v.plate_number)}</b>${v.province ? " " + esc(v.province) : ""}`,
       v.company_name ? `บริษัท: <b>${esc(v.company_name)}</b>` : "",
+      carTxt ? `รถ: ${esc(carTxt)}` : "",
       v.vehicle_type ? `ประเภท: ${esc(v.vehicle_type)}` : "",
       `เวลา: ${esc(when)}`,
-      v.note ? `หมายเหตุ: ${esc(v.note)}` : "",
-    ].filter(Boolean).join("\n");
+    ];
+    const linesTeam = [head, v.status === "needs_review" ? `⚠️ <b>AI ไม่แน่ใจ กรุณาตรวจทะเบียนในเว็บ</b>` : "", ...core, v.note ? `หมายเหตุ: ${esc(v.note)}` : ""].filter(Boolean).join("\n");
+    const linesCust = [head, ...core].filter(Boolean).join("\n"); // ลูกค้า: ไม่มีหมายเหตุภายใน และไม่มีปุ่มลิงก์เว็บทีมงาน
 
     let photo: string | null = null;
     if (v.image_path) {
@@ -104,13 +107,15 @@ Deno.serve(async (req) => {
       photo = s?.signedUrl ?? null;
     }
     let sent = 0; const errs: string[] = [];
-    for (const chat_id of new Set(targets.values())) {
+    for (const [chat_id, custOnly] of targets) {
+      const caption = custOnly ? linesCust : linesTeam;
+      const markup = custOnly ? undefined : reply_markup;
       try {
         try {
           if (!photo) throw new Error("no photo");
-          await tg(token, "sendPhoto", { chat_id, photo, caption: lines, parse_mode: "HTML", reply_markup });
+          await tg(token, "sendPhoto", { chat_id, photo, caption, parse_mode: "HTML", ...(markup ? { reply_markup: markup } : {}) });
         } catch {
-          await tg(token, "sendMessage", { chat_id, text: lines, parse_mode: "HTML", reply_markup });
+          await tg(token, "sendMessage", { chat_id, text: caption, parse_mode: "HTML", ...(markup ? { reply_markup: markup } : {}) });
         }
         sent++;
       } catch (e) { errs.push((e as Error).message); }

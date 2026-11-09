@@ -1,46 +1,48 @@
-# DockSense AI (เว็บสแตติก + Supabase)
+# DockSense AI
 
-ไม่มี build step — โฟลเดอร์นี้คือ "Root" ที่ Vercel ต้องเสิร์ฟ (index.html ต้องอยู่ชั้นบนสุด)
+ระบบจดทะเบียนรถเข้า-ออก: ถ่ายรูป/กล้อง ESP32 → AI อ่านป้าย → บันทึก → แจ้ง Telegram
+เว็บเป็นไฟล์สแตติก (ไม่มี build) + Supabase + Vercel · ติดตั้งเป็นแอปบนมือถือได้ (PWA)
+เว็บจริง: https://docksense-al.vercel.app
 
-## ไฟล์
-index.html · scan.html · style.css · config.js · common.js · manifest.webmanifest · icon.svg · vercel.json
-supabase/functions/ocr-plate/ (Edge Function)
+## แผนผังโฟลเดอร์
+```
+index.html, scan.html     หน้าเว็บ (ต้องอยู่ชั้นบนสุด — Vercel เสิร์ฟจากราก ไม่มี build)
+style.css, common.js      สไตล์ + ฟังก์ชันร่วม (common.js ลงทะเบียน sw.js)
+camlive.js, config.js     ดูกล้องสด / ค่า Supabase (anon key)
+sw.js, manifest.webmanifest, icon*.png|svg   PWA (เปิดเร็วแบบแอป)
+vercel.json               header/แคช (sw.js ไม่แคช, ไอคอนแคช 7 วัน)
+esp32/                    โค้ดบอร์ด + WIRING.md (วิธีต่อสาย)
+supabase/functions/       Edge Functions (โค้ดต้นฉบับ)
+  ocr-plate/              AI อ่านป้าย (Gemini อ่าน 1 รอบ; OCR_DOUBLE=1 = 2 รอบ)
+  camera-ingest/          รับรูปจาก ESP32/มือถือ → กรอง → OCR → บันทึก
+  notify-visit/           ส่งแจ้งเตือน Telegram (แยกตามบริษัท)
+  telegram-bot/           บอทตอบคำถาม (ประวัติ/รถบริษัท/สรุป/รูป/สี-ยี่ห้อ-รุ่น)
+supabase/migrations/      SQL ที่ใช้สร้างตาราง/คอลัมน์ (เรียงตามชื่อไฟล์)
+```
+หมายเหตุ: ฟังก์ชัน `device-ingest` บน Supabase เป็นของเก่า ไม่ได้ใช้และไม่อยู่ใน repo
 
-## ขั้นตอน (ทำตามลำดับ)
-1. (ทำแล้ว) ฐานข้อมูล, RLS, bucket และ config.js ตั้งค่าไว้แล้ว
-2. Supabase secrets: ตั้ง GEMINI_API_KEY (ตัวหลัก) และ/หรือ ANTHROPIC_API_KEY (ตัวสำรอง) — ต้องมีอย่างน้อยหนึ่งตัว (ต้องทำเอง)
-3. Supabase → Authentication → URL Configuration: Site URL = https://docksense-al.vercel.app
-   (ทดสอบเร็ว: ปิด "Confirm email" ที่ Providers → Email)
-4. Edge Function ocr-plate deploy แล้ว (ถ้าแก้โค้ดต้อง deploy ใหม่):
-   supabase login
-   supabase link --project-ref dhqvdbdqhcbymqvhpqop
-   supabase functions deploy ocr-plate
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxxx
-   (ไม่ต้องใช้ --no-verify-jwt — ฟังก์ชันรับเฉพาะผู้ที่ล็อกอินแล้ว กันคนนอกใช้เครดิต API)
-5. อัปโหลดทุกไฟล์ขึ้น GitHub (ให้ index.html อยู่ราก repo) → Vercel จะ deploy อัตโนมัติ
-   Vercel → Project Settings → General: Framework Preset = Other, Root Directory = (ว่าง/โฟลเดอร์ที่มี index.html),
-   Build Command และ Output Directory = ว่าง
-6. เปิดเว็บ → สมัครสมาชิก (คนแรก = admin) → ตั้งค่า → "ทดสอบการเชื่อมต่อ"
+## Deploy
+- เว็บ: push เข้า `main` → Vercel deploy เอง (Framework = Other, ไม่ต้องมี Build/Output)
+- ฟังก์ชัน: `supabase functions deploy <ชื่อ>` (camera-ingest และ telegram-bot ใช้ `--no-verify-jwt`; ocr-plate/notify-visit ตามค่าเดิมที่ตั้งไว้)
+- แก้ไฟล์เว็บแล้วอยากให้แอปมือถือรีเฟรชแน่นอน: เพิ่มเลขเวอร์ชัน `V` ใน sw.js
 
-## ตัวแปรสภาพแวดล้อม
-- Vercel: ไม่ต้องตั้งค่า
-- Supabase secrets: GEMINI_API_KEY และ/หรือ ANTHROPIC_API_KEY (ต้องมีอย่างน้อยหนึ่งตัว)
-  - GEMINI_MODEL (ไม่บังคับ — ถ้าไม่ตั้ง ระบบหารุ่น Gemini flash ที่ใช้ได้เอง), OCR_MODEL (ไม่บังคับ ใช้กับ claude), OCR_PROVIDER (ไม่บังคับ: gemini | claude)
-  - ลำดับใช้งาน: OCR_PROVIDER → gemini → claude (ตัวไหนล้มจะสลับไปตัวถัดไปที่ตั้ง key ไว้)
-  - Gemini อ่านป้าย 2 รอบเทียบกัน ถ้าไม่ตรงกันหน้าสแกนจะเตือนและให้เลือก
+## Secrets (Supabase → Edge Functions → Secrets)
+GEMINI_API_KEY (ตัวหลัก) และ/หรือ ANTHROPIC_API_KEY (สำรอง) · TELEGRAM_BOT_TOKEN
+ไม่บังคับ: GEMINI_MODEL, OCR_MODEL, OCR_PROVIDER, OCR_DOUBLE=1
+ห้ามใส่ token/คีย์ลงใน repo หรือแชร์ในกลุ่ม
 
-## แจ้งเตือน Telegram (notify-visit)
+## ตั้งค่าครั้งแรก
+1. Supabase → Authentication → URL Configuration: Site URL = https://docksense-al.vercel.app
+2. เปิดเว็บ → สมัครสมาชิก (คนแรก = admin) → ตั้งค่า → ทดสอบการเชื่อมต่อ
 
-1. สร้างบอทกับ @BotFather → ได้ Bot Token
-2. ตั้ง secret `TELEGRAM_BOT_TOKEN` ใน Supabase (Edge Functions → Secrets)
-3. เพิ่มบอทเข้ากลุ่ม แล้วพิมพ์ข้อความ 1 ข้อความ → เว็บ: ตั้งค่า → แจ้งเตือน Telegram → “ค้นหา Chat ID” → เลือกกลุ่ม → บันทึก → ทดสอบ
-4. ตั้งค่า → บริษัท → แตะบริษัท → ติ๊ก “แจ้งเตือน Telegram”
+## Telegram
+1. สร้างบอทกับ @BotFather → ตั้ง secret `TELEGRAM_BOT_TOKEN`
+2. เพิ่มบอทเข้ากลุ่ม → เว็บ: ตั้งค่า → แจ้งเตือน Telegram → ค้นหา Chat ID → เลือก → บันทึก
+   (กลุ่มลูกค้า: เลือกบริษัท — กลุ่มนั้นเห็นเฉพาะรถบริษัทตัวเอง)
+3. เปิดบอทตอบคำถาม (ครั้งเดียว): เปิด `https://dhqvdbdqhcbymqvhpqop.supabase.co/functions/v1/telegram-bot?setup=1`
+   (`?status=1` ตรวจสถานะ, `?remove=1` ปิด)
 
-## กล้อง ESP32-CAM (camera-ingest)
-
-ESP32-CAM ถ่ายรูป → `POST` JPEG ไปที่ `…/functions/v1/camera-ingest` พร้อมหัว `x-device-key` →
-ระบบอ่านทะเบียน (ocr-plate) → บันทึก (source = esp32; ถ้า AI ไม่แน่ใจจะเป็น “ต้องตรวจสอบ”) → ส่ง Telegram พร้อมปุ่ม “ดูข้อมูลรถ” (`/#v=<id>`)
-
-1. เว็บ: ตั้งค่า → กล้อง ESP32-CAM → “+ เพิ่มกล้อง” → ใส่ Wi-Fi → ดาวน์โหลด `docksense_cam.ino`
-2. Arduino IDE: Board “AI Thinker ESP32-CAM” → อัปโหลด (ต้นฉบับเทมเพลตอยู่ที่ `esp32/docksense_cam.ino`)
-3. ไฟแดงบนบอร์ด: กะพริบ 1 ครั้ง = ส่งสำเร็จ · 4 ครั้ง = ไม่สำเร็จ
+## ระบบกล้อง: เร็วและประหยัดโควตา AI
+ลำดับกรองใน camera-ingest (ผ่านด่านไหนไม่ถึง AI = ไม่เสียโควตา):
+ภาพสด/พรีวิวไม่ใช้ AI → ไฟล์เล็ก <9 KB (เฟรมมืด/เลนส์บัง) → ภาพซ้ำเดิมภายใน 2 นาที → คูลดาวน์ 30 วินาที/กล้อง → AI อ่าน 1 รอบ
+เสริม: ESP32 ถ่ายเมื่อเซ็นเซอร์ตรวจพบรถเท่านั้น, ลดรูปเหลือ 1280px, อัปโหลดรูปขนานกับการอ่าน, แจ้ง Telegram เบื้องหลัง, AI ล้มแล้วเก็บเข้า "รอตรวจสอบ"
