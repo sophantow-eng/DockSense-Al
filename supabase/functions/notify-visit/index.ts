@@ -88,7 +88,9 @@ Deno.serve(async (req) => {
 
     const when = new Intl.DateTimeFormat("th-TH", { timeZone: TZ, dateStyle: "medium", timeStyle: "short" }).format(new Date(v.capture_at));
     const link = v.vehicle_id ? `${SITE}/#v=${v.vehicle_id}` : `${SITE}/#t=history`;
-    const reply_markup = { inline_keyboard: [[{ text: "🔎 ดูข้อมูลรถ", url: link }]] };
+    // รถที่ยังไม่มีบริษัท/ข้อมูล (รถใหม่ หรือรถที่เคยบันทึกแต่ยังไม่ใส่บริษัท) → ขอให้ทีมงานเติมข้อมูล
+    const needInfo = v.status !== "needs_review" && !!v.vehicle_id && !v.company_id;
+    const reply_markup = { inline_keyboard: [[{ text: needInfo ? "✏️ ใส่ข้อมูลรถ" : "🔎 ดูข้อมูลรถ", url: link }]] };
     const carTxt = [v.vehicle_brand, v.vehicle_model].filter(Boolean).join(" ") + (v.vehicle_color ? ` (สี${v.vehicle_color})` : "");
     const head = `${v.source === "esp32" ? "📷" : "🚚"} <b>รถเข้าพื้นที่</b>${v.source === "esp32" ? " (กล้อง)" : ""}`;
     const core = [
@@ -98,7 +100,7 @@ Deno.serve(async (req) => {
       v.vehicle_type ? `ประเภท: ${esc(v.vehicle_type)}` : "",
       `เวลา: ${esc(when)}`,
     ];
-    const linesTeam = [head, v.status === "needs_review" ? `⚠️ <b>AI ไม่แน่ใจ กรุณาตรวจทะเบียนในเว็บ</b>` : "", ...core, v.note ? `หมายเหตุ: ${esc(v.note)}` : ""].filter(Boolean).join("\n");
+    const linesTeam = [head, v.status === "needs_review" ? `⚠️ <b>AI ไม่แน่ใจ กรุณาตรวจทะเบียนในเว็บ</b>` : "", needInfo ? `🆕 <b>${v.status === "new_vehicle" ? "รถคันใหม่ ยังไม่มีข้อมูล" : "รถคันนี้ยังไม่ระบุบริษัท"}</b> — กดปุ่มด้านล่างเพื่อใส่บริษัท/ข้อมูลรถ` : "", ...core, v.note ? `หมายเหตุ: ${esc(v.note)}` : ""].filter(Boolean).join("\n");
     const linesCust = [head, ...core].filter(Boolean).join("\n"); // ลูกค้า: ไม่มีหมายเหตุภายใน และไม่มีปุ่มลิงก์เว็บทีมงาน
 
     let photo: string | null = null;

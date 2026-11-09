@@ -96,12 +96,33 @@ Deno.serve(async (req) => {
     const thP = sb.from("app_settings").select("value").eq("key", "ocr_thresholds").maybeSingle();
     const dropLater = () => bg(upP.then(() => sb.storage.from("plate-images").remove([path])).then(() => null, () => null));
 
-    const ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },
-      body: JSON.stringify({ imageBase64: encodeBase64(bytes), mediaType: "image/jpeg" }),
-    });
-    const ocr = await ocrRes.json().catch(() => ({}));
+    // ผู้อ่านทะเบียน 2 ชั้น: (1) Python backend (OpenCV+EasyOCR) ถ้าตั้ง OCR_BACKEND_URL · มั่นใจพอ = ใช้เลย ไม่เรียก Gemini (ประหยัดโควตา)
+    // (2) ไม่ตั้ง/ช้า/ล้ม/ไม่มั่นใจ → ถอยไปใช้ ocr-plate (Gemini) เหมือนเดิม
+    // deno-lint-ignore no-explicit-any
+    let ocr: any = {}; let ocrOk = false; let viaBackend = false;
+    const bUrl = (Deno.env.get("OCR_BACKEND_URL") || "").replace(/\/$/, ""), bKey = Deno.env.get("OCR_BACKEND_KEY") || "";
+    if (bUrl && bKey) {
+      try {
+        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg" }, body: bytes, signal: AbortSignal.timeout(8000) });
+        if (br.ok) {
+          const b = await br.json();
+          // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) backend ผ่านให้ที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
+          if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
+            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: "easyocr", known: b.known_vehicle === true };
+            ocrOk = true; viaBackend = true;
+          }
+        }
+      } catch (_) { /* backend หลับ/ช้า → ใช้ Gemini */ }
+    }
+    let ocrRes = { ok: ocrOk } as Response;
+    if (!ocrOk) {
+      ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: encodeBase64(bytes), mediaType: "image/jpeg" }),
+      });
+      ocr = await ocrRes.json().catch(() => ({}));
+    }
     if (!ocrRes.ok) {
       // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
       const lp = lastPending.get(dev.id) || 0;
@@ -131,11 +152,18 @@ Deno.serve(async (req) => {
 
     // 3) บันทึก
     let visitId: string | null = null, status: string, vehicleId: string | null = null;
-    if (conf >= high && !ocr.needs_review) {
+    if ((conf >= high || ocr.known === true) && !ocr.needs_review) {
+      // ทะเบียนเก่า: ผูกกับรถที่ลงทะเบียนไว้ทันที (backend ไม่ส่งจังหวัด → ไม่ให้สร้างรถซ้ำ)
+      let knownId: string | null = null, knownProv: string | null = ocr.province ?? null;
+      if (viaBackend) {
+        const norm0 = String(ocr.plate).replace(/[\s\-]/g, "").toUpperCase();
+        const { data: kv } = await sb.from("vehicles").select("id,province").eq("plate_norm", norm0).limit(2);
+        if (kv && kv.length === 1) { knownId = kv[0].id; knownProv = kv[0].province; }
+      }
       const { data, error } = await sb.rpc("record_visit", {
-        p_plate: ocr.plate, p_province: ocr.province, p_vehicle_type: ocr.vehicle_type, p_note: `กล้อง: ${dev.name}`,
+        p_plate: ocr.plate, p_province: knownProv, p_vehicle_type: ocr.vehicle_type, p_note: `กล้อง: ${dev.name}`,
         p_image_path: path, p_confidence: conf, p_provider: ocr.provider ?? null, p_source: isPhone ? "phone" : "esp32",
-        p_vehicle_id: null, p_company_id: null, p_new_company_name: null, p_register: true, p_verified: false,
+        p_vehicle_id: knownId, p_company_id: null, p_new_company_name: null, p_register: true, p_verified: false,
       });
       if (error) { await drop(); return json({ error: error.message }, 500); }
       if (data.duplicate) { await drop(); return json({ ok: true, duplicate: true, plate: ocr.plate }); }
@@ -161,7 +189,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ visit_id: visitId, force: true }),
     }).catch(() => null));
     const notified = "queued";
-    return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, notified });
+    return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, engine: viaBackend ? "backend" : "gemini", notified });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

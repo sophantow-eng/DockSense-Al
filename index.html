@@ -571,7 +571,13 @@ async function boot() {
   const y = new Date().getFullYear(); $("#fy").innerHTML += [0,1,2,3,4,5].map((i) => `<option>${y - i}</option>`).join("");
   await countNewViewers(); loadCompanies(); go("home"); openFromHash(); welcomeSheet();
   window.addEventListener("hashchange", openFromHash);
-  let t; db.channel("rt").on("postgres_changes", { event: "*", schema: "public", table: "vehicle_logs" }, () => { clearTimeout(t); t = setTimeout(() => reload(), 400); }).subscribe();
+  let t; db.channel("rt").on("postgres_changes", { event: "*", schema: "public", table: "vehicle_logs" }, (p) => {
+    if (p.eventType === "INSERT" && p.new) {
+      if (p.new.status === "new_vehicle") DS.toast("🆕 รถคันใหม่ " + p.new.plate_number + " — ใส่ข้อมูลรถได้ที่หน้าภาพรวม", "info");
+      else if (p.new.status === "needs_review") DS.toast("⚠️ มีรายการให้ตรวจทะเบียน (แท็บ AI)", "info");
+    }
+    clearTimeout(t); t = setTimeout(() => reload(), 400);
+  }).subscribe();
 }
 // ลิงก์จาก Telegram: #v=<รหัสรถ> เปิดรายละเอียดรถ · #t=history|search|set เปิดแท็บ
 function openFromHash() {
@@ -587,6 +593,30 @@ function go(t) {
 }
 function reload() { ({ home: loadHome, history: () => loadHistory(true), search: loadSearch, ai: loadAI, set: loadSettings })[tab](); }
 
+/* ---------- รถที่ยังไม่มีข้อมูล (ยังไม่ระบุบริษัท) → ให้ทีมงานเติม ---------- */
+function needInfoHtml(list) {
+  if (!list.length || !DS.can(me, "write")) return "";
+  return `<div class="card" style="border-left:4px solid var(--warn,#f59e0b)"><h3>🆕 รถรอใส่ข้อมูล (${list.length})</h3><p class="muted" style="margin:0 0 6px">รถเหล่านี้เข้ามาแล้วแต่ยังไม่ระบุบริษัท แตะเพื่อใส่ข้อมูล</p>
+  ${list.slice(0, 5).map((x) => `<button type="button" class="ghost needInfo" data-v="${esc(x.vehicle_id)}" style="width:100%;margin-top:6px;display:flex;justify-content:space-between"><span class="plate">${esc(x.plate_number)}</span><span class="muted">✏️ ใส่ข้อมูล</span></button>`).join("")}
+  ${list.length > 5 ? `<p class="muted" style="margin:8px 0 0">และอีก ${list.length - 5} คัน</p>` : ""}</div>`;
+}
+function bindNeedInfo() { document.querySelectorAll(".needInfo").forEach((b) => (b.onclick = () => openVehicle(b.dataset.v))); }
+
+/* ---------- วิธีใช้ + อัปเดตล่าสุด ---------- */
+function guideSheet() {
+  const m = DS.modal("วิธีใช้ และมีอะไรใหม่", `
+  <h4 style="margin:0 0 6px">ระบบทำงานยังไง</h4>
+  <ol class="steps"><li>รถเข้าใกล้ เซนเซอร์ปลุกกล้อง ESP32-CAM ถ่ายภาพ</li><li>ภาพส่งขึ้นระบบเอง อ่านทะเบียนให้ ไม่ต้องกดอะไร</li><li><b>รถที่เคยมา</b> ระบบจำได้ บันทึกและแจ้ง Telegram ทันที</li><li><b>รถใหม่</b> ขึ้นการ์ด “🆕 รถรอใส่ข้อมูล” บนหน้าภาพรวม และส่งปุ่ม “✏️ ใส่ข้อมูลรถ” ไป Telegram แตะแล้วเลือกบริษัทได้เลย</li><li>ถ้า AI ไม่แน่ใจ รายการจะรอที่แท็บ <b>AI → คิวตรวจสอบ</b> ให้คนยืนยัน</li></ol>
+  <h4 style="margin:14px 0 6px">มีอะไรใหม่</h4>
+  <ul class="steps" style="list-style:disc">
+  <li>แท็บ <b>AI</b>: สถานะกล้อง ผลการอ่าน และคิวตรวจสอบ</li>
+  <li>เตือนรถใหม่ที่ยังไม่มีข้อมูล ทั้งในเว็บและ Telegram (มีป๊อปอัปทันทีเมื่อกล้องจับรถใหม่)</li>
+  <li>ตัวอ่านทะเบียน Python (OpenCV + EasyOCR) เป็นตัวเสริม: รถที่เคยลงทะเบียนจะผ่านเร็วขึ้น ถ้าตัวนี้ไม่พร้อมจะใช้ Gemini เหมือนเดิม</li>
+  <li>กล้องมือถือตรวจป้ายในเครื่องก่อนส่ง ประหยัดโควตา AI</li></ul>
+  <p class="muted" style="margin-top:10px">เปิดหน้านี้ซ้ำได้จากปุ่ม “วิธีใช้” ในแท็บ AI</p>
+  <button id="gOk" type="button" style="width:100%;margin-top:12px">เข้าใจแล้ว</button>`);
+  m.querySelector("#gOk").onclick = () => m.remove();
+}
 /* ---------- ศูนย์ AI: สถานะอุปกรณ์ + ผลอ่านทะเบียนจากข้อมูลจริง (ไม่อ้างความแม่นยำ ถ้ายังไม่มีเฉลย) ---------- */
 async function loadAI() {
   if (!$("#aic").innerHTML) $("#aic").innerHTML = spin;
@@ -603,7 +633,7 @@ async function loadAI() {
   const srcName = { phone: "กล้องมือถือ", camera: "ESP32-CAM", manual: "บันทึกเอง", esp32: "ESP32-CAM" };
   const devs = cs.data.map((c) => `<div class="camrow"><div style="min-width:0"><b class="wrapsafe">📷 ${esc(c.name)}</b><div class="muted"><span class="dot ${camOn(c) ? "on" : ""}"></span>${camOn(c) ? "ออนไลน์" : "ออฟไลน์"}${c.last_seen ? " · เห็นล่าสุด " + new Date(c.last_seen).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : " · ยังไม่เคยเชื่อมต่อ"}${c.last_plate ? " · ล่าสุด " + esc(c.last_plate) : ""}</div></div></div>`).join("");
   const off = cs.data.filter((c) => !camOn(c)).length;
-  $("#aic").innerHTML = `<div class="card"><h3>สถานะอุปกรณ์</h3>${devs || '<p class="muted" style="margin:0">ยังไม่มีกล้อง ESP32 ลงทะเบียนไว้</p>'}
+  $("#aic").innerHTML = `<button type="button" class="ghost" id="guideBtn" style="width:100%;margin-bottom:12px">📖 วิธีใช้ และมีอะไรใหม่</button><div class="card"><h3>สถานะอุปกรณ์</h3>${devs || '<p class="muted" style="margin:0">ยังไม่มีกล้อง ESP32 ลงทะเบียนไว้</p>'}
     <p class="muted" style="margin:8px 0 0">${cs.data.length ? (off ? `ออฟไลน์ ${off} จาก ${cs.data.length} ตัว` : "ทุกตัวออนไลน์") : ""} · สถานะเซนเซอร์และ DevKit ยังไม่ถูกส่งเข้าระบบ (รอเฟิร์มแวร์รุ่นถัดไป)</p></div>
   <div class="chips"><div><b>${n(rows.length)}</b><span>อ่าน 30 วัน</span></div><div><b>${n(review.length)}</b><span>ต้องตรวจสอบ</span></div><div><b>${avg == null ? "-" : Math.round(avg * 100) + "%"}</b><span>ความมั่นใจเฉลี่ย</span></div></div>
   <div class="card"><h3>ผลการอ่านทะเบียน (30 วัน)</h3>
@@ -613,7 +643,7 @@ async function loadAI() {
     ${Object.keys(bySrc).map((k) => `<div class="row sp"><span class="muted">ที่มา: ${esc(srcName[k] || k)}</span><span>${n(bySrc[k])}</span></div>`).join("")}
     <p class="muted" style="margin:10px 0 0">ตัวเลขนี้คือ “ความมั่นใจที่ AI รายงาน” ไม่ใช่ความแม่นยำจริง การวัดความแม่นยำต้องมีภาพทดสอบที่มีเฉลย (ยังไม่มีในระบบ)</p></div>
   <div class="card"><h3>คิวตรวจสอบ ${review.length ? `(${n(review.length)})` : ""}</h3>${review.length ? review.slice(0, 20).map(itemHtml).join("") : '<div class="empty">ไม่มีรายการค้าง</div>'}</div>`;
-  bindItems($("#aic"), review);
+  bindItems($("#aic"), review); $("#guideBtn").onclick = guideSheet;
 }
 /* ---------- home ---------- */
 function bars(data, color) {
@@ -622,17 +652,20 @@ function bars(data, color) {
 }
 async function loadHome() {
   if (!$("#home").innerHTML) $("#home").innerHTML = spin;
-  const [s, r, cs] = await Promise.all([db.rpc("dashboard_stats"), db.from("visit_details").select("*").order("capture_at", { ascending: false }).limit(8), db.from("camera_status").select("*").eq("enabled", true).order("name")]);
+  const since14 = new Date(Date.now() - 14 * 864e5).toISOString();
+  const [s, r, cs, ni] = await Promise.all([db.rpc("dashboard_stats"), db.from("visit_details").select("*").order("capture_at", { ascending: false }).limit(8), db.from("camera_status").select("*").eq("enabled", true).order("name"),
+    db.from("visit_details").select("vehicle_id,plate_number,capture_at,status").is("company_id", null).not("vehicle_id", "is", null).neq("status", "needs_review").gte("capture_at", since14).order("capture_at", { ascending: false }).limit(60)]);
   if (s.error || r.error) { $("#home").innerHTML = errBox((s.error || r.error).message, "loadHome()"); return; }
   const d = s.data, n = (v) => Number(v).toLocaleString("th-TH");
-  $("#home").innerHTML = greeting() + camHome(cs.data || []) + `<div class="board"><div class="lbl">รถเข้าวันนี้</div><div class="big">${n(d.today_total)}<small>คัน</small></div><div class="sub">ทะเบียนไม่ซ้ำ <b>${n(d.today_unique)}</b> คัน</div></div>
+  const need = []; (ni.data || []).forEach((x) => { if (!need.some((y) => y.vehicle_id === x.vehicle_id)) need.push(x); });
+  $("#home").innerHTML = greeting() + needInfoHtml(need) + camHome(cs.data || []) + `<div class="board"><div class="lbl">รถเข้าวันนี้</div><div class="big">${n(d.today_total)}<small>คัน</small></div><div class="sub">ทะเบียนไม่ซ้ำ <b>${n(d.today_unique)}</b> คัน</div></div>
   <div class="chips"><div><b>${n(d.month_total)}</b><span>เดือนนี้</span></div><div><b>${n(d.year_total)}</b><span>ปีนี้</span></div><div><b>${n(d.all_total)}</b><span>ทั้งหมด</span></div></div>
   <div class="card"><div class="row sp" style="align-items:baseline"><h3>รายการล่าสุด</h3><a href="#" id="seeAll" style="flex:none">ดูทั้งหมด</a></div>${r.data.length ? r.data.map(itemHtml).join("") : '<div class="empty">ยังไม่มีรายการ<br>กดปุ่ม “สแกนทะเบียน” เพื่อบันทึกคันแรก</div>'}</div>
   <div class="card"><h3>จำนวนรถรายวัน (30 วัน)</h3>${bars(d.daily)}</div>
   <div class="card"><h3>รายเดือน (12 เดือน)</h3>${bars(d.monthly)}</div>
   <div class="card"><h3>สถิติรายปี</h3>${d.yearly.length ? bars(d.yearly) : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>`;
   $("#seeAll").onclick = (e) => { e.preventDefault(); go("history"); };
-  bindItems($("#home"), r.data); bindGreeting(); bindCamHome(cs.data || []);
+  bindItems($("#home"), r.data); bindGreeting(); bindCamHome(cs.data || []); bindNeedInfo();
 }
 /* ---------- บริษัท / โลโก้ ---------- */
 let companies = [];
