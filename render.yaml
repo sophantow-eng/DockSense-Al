@@ -1,0 +1,15 @@
+# Render Blueprint (แผนฟรี) — บริการแยกจาก reading-shelf · ตั้งค่า secret ในหน้า Render ไม่ใส่ไว้ในไฟล์นี้
+services:
+  - type: web
+    name: docksense-ocr
+    runtime: docker
+    plan: free
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: BACKEND_KEY
+        sync: false
+      - key: OCR_CONCURRENCY
+        value: "1"

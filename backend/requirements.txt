@@ -3,8 +3,7 @@ uvicorn[standard]==0.32.1
 python-multipart==0.0.20
 opencv-python-headless==4.10.0.84
 numpy<2
-# OCR engine (หนัก: ดึง torch) — ถ้ายังไม่ลง ระบบจะรายงาน engine_unavailable และ camera-ingest จะถอยไปใช้ Gemini เหมือนเดิม
-easyocr==1.7.2
+pytesseract==0.3.13
 # test
 pytest==8.3.4
 httpx==0.28.1

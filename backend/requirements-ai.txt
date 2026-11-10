@@ -1,0 +1,3 @@
+# ตัวสำรอง AI สำหรับแล็ปท็อป/เครื่องแรง (ลง torch CPU แยกตาม Dockerfile.ai)
+-r requirements.txt
+easyocr==1.7.2
