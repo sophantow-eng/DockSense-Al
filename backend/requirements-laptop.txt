@@ -1,0 +1,5 @@
+# เสริมสำหรับ venv-easyocr บน Windows (torch / easyocr / opencv-headless / numpy / psutil ลงแล้ว — ไม่ต้องลงซ้ำ ไม่ pin numpy<2)
+fastapi
+uvicorn[standard]
+python-multipart
+pytesseract

@@ -47,8 +47,8 @@ async def _images(request: Request, files: list[UploadFile] | None) -> list[byte
     for b in out:
         if len(b) > config.MAX_IMAGE_BYTES:
             raise HTTPException(413, "image too large")
-        if len(b) < 2000 or b[:2] != b"\xff\xd8":
-            raise HTTPException(415, "JPEG only")
+        if len(b) < 2000 or not (b[:2] == b"\xff\xd8" or b[:4] == b"\x89PNG"):
+            raise HTTPException(415, "JPEG or PNG only")
     return out
 
 def _guarded(fn, *a):
@@ -141,3 +141,47 @@ async def upload(request: Request, x_api_key: str | None = Header(default=None),
                  x_ocr_fallback: str | None = Header(default=None)):
     """ชื่อตามพรอมต์: กล้อง/เกตเวย์ส่ง JPEG ดิบ (ทำงานเหมือน /recognition/process แบบภาพเดียว)"""
     return await process(request, None, x_api_key, x_ocr_engines, x_ocr_fallback)
+
+@app.get("/health")
+def health_short():
+    return health()
+
+@app.post("/recognize")
+async def recognize(request: Request, file: UploadFile | None = File(default=None), device_id: str | None = None,
+                    x_api_key: str | None = Header(default=None), x_ocr_engines: str | None = Header(default=None),
+                    x_ocr_fallback: str | None = Header(default=None)):
+    """รูปแบบตามสเปก AI Worker: รับไฟล์ภาพ (multipart 'file' หรือ body ดิบ) + device_id/x-request-id (ไม่บังคับ) → JSON สรุป
+    ผลของ Tesseract และ AI แยกกันอยู่ใน 'engines' · ไม่เดาตัวอักษร · ไม่ผ่านเกณฑ์ = NEEDS_REVIEW"""
+    _auth(x_api_key)
+    engines = _engines(x_ocr_engines)
+    if not engines:
+        raise HTTPException(409, "recognition_disabled")
+    imgs = await _images(request, [file] if file else None)
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    try:
+        out = await run_in_threadpool(_guarded, recognition_service.process, imgs, engines, x_ocr_fallback != "0")
+    except HTTPException:
+        raise
+    except Exception:
+        _stats["errors"] += 1
+        log.exception("recognize failed rid=%s", rid)
+        raise HTTPException(500, "recognition_failed")
+    _stats["ok"] += 1
+    warns = []
+    for name, r in (out.get("engines") or {}).items():
+        if r.get("status") in ("ERROR", "UNAVAILABLE", "NOT_CONFIGURED"):
+            warns.append(f"{name}: {r.get('status')}")
+    if out.get("conflict"):
+        warns.append("engines_disagree")
+    if out.get("status") == "NEEDS_REVIEW":
+        warns.append("needs_human_review")
+    warns.append("province_not_extracted")
+    return {
+        "success": out.get("status") != "FAILED", "request_id": rid, "device_id": device_id,
+        "status": out.get("status"), "plate_text": out.get("plate"), "province": None,
+        "engine": out.get("decided_by"), "confidence": out.get("confidence"),
+        "processing_time_ms": out.get("ms"), "review_required": bool(out.get("needs_review")),
+        "warnings": warns, "raw_text": out.get("raw", []),
+        "engines": {k: {"status": v.get("status"), "plate": v.get("plate"), "confidence": v.get("confidence"),
+                        "ms": v.get("ms"), "rss_mb": v.get("rss_mb"), "error": v.get("error")} for k, v in (out.get("engines") or {}).items()},
+    }

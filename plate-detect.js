@@ -6,23 +6,24 @@
 (function (root) {
   function detect(g, W, H, opt) {
     opt = opt || {};
-    const minScore = opt.minScore || 0.62, T = opt.edge || 26, C = 2;           // C = ขนาดช่องตาราง (พิกเซล) เพื่อให้เร็ว
+    const minScore = opt.minScore || 0.68, T = opt.edge || 26, C = 2;           // C = ขนาดช่องตาราง (พิกเซล) เพื่อให้เร็ว
     const gw = Math.floor(W / C), gh = Math.floor(H / C), S = gw + 1;
-    const IE = new Int32Array(S * (gh + 1)), IL = new Float64Array(S * (gh + 1));
+    const IE = new Int32Array(S * (gh + 1)), IL = new Float64Array(S * (gh + 1)), IQ = new Float64Array(S * (gh + 1));
     for (let cy = 0; cy < gh; cy++) {
-      let re = 0, rl = 0;
+      let re = 0, rl = 0, rq = 0;
       for (let cx = 0; cx < gw; cx++) {
         for (let dy = 0; dy < C; dy++) for (let dx = 0; dx < C; dx++) {
           const x = cx * C + dx, i = (cy * C + dy) * W + x;
           if (x > 0 && x < W - 1 && Math.abs(g[i + 1] - g[i - 1]) > T) re++;
-          rl += g[i];
+          rl += g[i]; rq += g[i] * g[i];
         }
-        IE[(cy + 1) * S + cx + 1] = IE[cy * S + cx + 1] + re; IL[(cy + 1) * S + cx + 1] = IL[cy * S + cx + 1] + rl;
+        IE[(cy + 1) * S + cx + 1] = IE[cy * S + cx + 1] + re; IL[(cy + 1) * S + cx + 1] = IL[cy * S + cx + 1] + rl; IQ[(cy + 1) * S + cx + 1] = IQ[cy * S + cx + 1] + rq;
       }
     }
     const A = C * C;
     const sE = (x0, y0, x1, y1) => IE[y1 * S + x1] - IE[y0 * S + x1] - IE[y1 * S + x0] + IE[y0 * S + x0];
     const sL = (x0, y0, x1, y1) => IL[y1 * S + x1] - IL[y0 * S + x1] - IL[y1 * S + x0] + IL[y0 * S + x0];
+    const sQ = (x0, y0, x1, y1) => IQ[y1 * S + x1] - IQ[y0 * S + x1] - IQ[y1 * S + x0] + IQ[y0 * S + x0];
     let best = null;
     for (const wf of [0.08, 0.11, 0.15, 0.2, 0.27, 0.36, 0.48]) {
       for (const ar of [2.4, 3.0, 3.6]) {
@@ -40,8 +41,13 @@
           const ringD = (eOut - ein) / ringArea, iso = 1 - Math.min(1, ringD / (e + 1e-6));
           const lIn = sL(x, y, x + w, y + h) / area, lRing = (sL(x - mx, y - my, x + w + mx, y + h + my) - lIn * area) / ringArea;
           const con = Math.min(1, Math.abs(lIn - lRing) / 60);
+          // ป้าย = พื้นสว่างตัวอักษรดำ → ความสว่างในกรอบแกว่งแรง (ส่วนเบี่ยงเบนมาตรฐาน) ต่างจากหญ้า/พื้น/ตะแกรง
+          const varIn = sQ(x, y, x + w, y + h) / area - lIn * lIn, sd = Math.sqrt(Math.max(0, varIn));
+          if (sd < (opt.minSd || 38)) continue;
           const eS = Math.max(0, 1 - Math.abs(e - 0.2) / 0.2), mS = Math.min(1, (midRatio - 1.4) / 1.6);
-          const score = eS * 0.25 + iso * 0.35 + con * 0.2 + mS * 0.2;
+          const sdS = Math.min(1, sd / 70), sizeS = Math.min(1, w / (gw * 0.2));
+          const score = eS * 0.18 + iso * 0.27 + con * 0.1 + mS * 0.15 + sdS * 0.2 + sizeS * 0.1;
+          if (opt.all && score > 0.4) opt.all.push({ x: x * C, y: y * C, w: w * C, h: h * C, score: +score.toFixed(3), sd: +sd.toFixed(0), iso: +iso.toFixed(2) });
           if (score >= minScore && (!best || score > best.score)) best = { x: x * C, y: y * C, w: w * C, h: h * C, score: +score.toFixed(3) };
         }
       }

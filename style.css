@@ -255,3 +255,9 @@ body:has(#login:not(.hide)){background:var(--ink)}
 .camtab .dot{flex:none}
 .camwrap:fullscreen{display:flex;align-items:center;justify-content:center;border-radius:0}
 .camwrap:fullscreen img{max-height:100vh;width:auto;max-width:100%}
+
+/* สแกนหาป้ายทะเบียน: เส้นกวาดทั้งเฟรมขณะยังหาไม่เจอ · กรอบล็อกป้ายเลื่อนนุ่ม */
+.scanline{position:absolute;left:0;right:0;top:0;height:46px;pointer-events:none;background:linear-gradient(to bottom,rgba(34,211,190,0),rgba(34,211,190,.28) 85%,rgba(34,211,190,.9) 100%);border-bottom:2px solid #22d3be;animation:scansweep 2.4s ease-in-out infinite alternate}
+@keyframes scansweep{from{top:0}to{top:calc(100% - 46px)}}
+.lockbox{transition:left .15s linear,top .15s linear,width .15s linear,height .15s linear,border-color .2s}
+@media (prefers-reduced-motion:reduce){.scanline{animation:none;top:calc(50% - 23px)}}

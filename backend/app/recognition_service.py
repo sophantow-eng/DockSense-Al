@@ -87,6 +87,11 @@ def _frames(images, reader, variant_names):
 def rss_mb() -> float | None:
     """หน่วยความจำจริงของโปรเซสนี้ตอนนี้ (MB) — อ่านจาก /proc (Linux) · อ่านไม่ได้ = None (ไม่เดา)"""
     try:
+        import psutil  # Windows/Linux (ถ้าลงไว้)
+        return round(psutil.Process().memory_info().rss / 1048576, 1)
+    except Exception:
+        pass
+    try:
         with open("/proc/self/statm") as f:
             return round(int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 1048576, 1)
     except Exception:

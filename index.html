@@ -393,7 +393,7 @@ async function phoneCam() {
   const uid = (me && me.id) || "u", id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)), defName = "มือถือ " + ((me.full_name || "").trim().split(/\s+/)[0] || "ของฉัน");
   const m = DS.modal("📱 ใช้มือถือเป็นกล้อง", `<p class="muted" style="margin-top:0">เครื่องนี้จะส่งภาพสดให้ทุกคนที่ล็อกอินเลือกดูได้ และกดถ่ายทะเบียนจากภาพนี้ได้ <b>เปิดหน้านี้ค้างไว้และไม่ล็อกหน้าจอ</b></p>
     <label>ชื่อกล้อง</label><input id="pcName" value="${esc(defName)}" maxlength="30">
-    <div class="camwrap" style="margin-top:10px"><video id="pcV" muted playsinline autoplay style="display:block;width:100%"></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcBox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
+    <div class="camwrap" style="margin-top:10px"><video id="pcV" muted playsinline autoplay style="display:block;width:100%"></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcScan" class="scanline" style="display:none"></div><div id="pcBox" class="lockbox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
     <p class="muted" id="pcInfo" style="margin:8px 0 0"></p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="pcAuto" style="width:auto;min-height:0"> ถ่ายทะเบียนอัตโนมัติเมื่อเห็นป้ายเข้าใกล้และนิ่ง (ตรวจในเครื่อง ไม่เสียโควตา AI — เรียก AI เมื่อป้ายชัดแล้วเท่านั้น)</label><p class="muted" id="pcAuto2" style="margin:4px 0 0"></p>
     <div class="row" style="margin-top:10px"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcNow" type="button">อ่านทะเบียนตอนนี้</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
@@ -494,16 +494,26 @@ async function phoneCam() {
       ocrBusy = false;
     };
     q("#pcNow").onclick = () => { if (!running || ocrBusy) return; doOcr(null); armed = false; };
-    let armed = true, stable = 0, last = null, goneAt = 0, grabbing = false;
+    let armed = true, stable = 0, last = null, goneAt = 0, grabbing = false, trk = null, seenAt = 0;
     autoT = setInterval(async () => {
-      const on = q("#pcAuto") && q("#pcAuto").checked; if (!on) { box(null); return; }
+      const on = q("#pcAuto") && q("#pcAuto").checked; if (!on) { box(null); const sx = q("#pcScan"); if (sx) sx.style.display = "none"; trk = null; return; }
       if (!running || ocrBusy || grabbing) return; const v = q("#pcV"); if (!v.videoWidth) return;
       if (Date.now() - flipAt < 2500) { last = null; stable = 0; return; }
-      const { g, W, H } = grayOf(v), r = window.DSPlate.detect(g, W, H);
-      if (!r) { box(null); last = null; stable = 0; if (!goneAt) goneAt = Date.now(); if (!armed && Date.now() - goneAt > 3000) { armed = true; say("พร้อม: รอรถคันถัดไป"); } return; }
-      goneAt = 0;
-      const big = r.w / W >= 0.12;
-      box(r, W, H, big);
+      const { g, W, H } = grayOf(v), r0 = window.DSPlate.detect(g, W, H), now = Date.now();
+      // สแกนทั้งเฟรมทุกรอบ · เจอป้าย = กรอบเขียว/ส้มตามติดแบบนุ่ม (ไม่สั่น) · หลุดเฟรมสั้นๆ (<0.7 วิ) กรอบค้างไว้ · หายนาน = กลับไปสแกนหาต่อ
+      const sc = (on) => { const e = q("#pcScan"); if (e) e.style.display = on ? "block" : "none"; };
+      if (r0) { trk = (trk && Math.hypot(r0.x + r0.w / 2 - trk.x - trk.w / 2, r0.y + r0.h / 2 - trk.y - trk.h / 2) / W < 0.15) ? { x: trk.x + (r0.x - trk.x) * 0.45, y: trk.y + (r0.y - trk.y) * 0.45, w: trk.w + (r0.w - trk.w) * 0.45, h: trk.h + (r0.h - trk.h) * 0.45 } : { x: r0.x, y: r0.y, w: r0.w, h: r0.h }; seenAt = now; }
+      else if (trk && now - seenAt > 700) trk = null;
+      if (!r0) {
+        last = null; stable = 0;
+        if (trk) { box(trk, W, H, false); sc(false); return; }
+        box(null); sc(true); if (!goneAt) goneAt = now;
+        if (!armed && now - goneAt > 3000) { armed = true; say("พร้อม: รอรถคันถัดไป"); } else if (armed) say("กำลังสแกนหาป้ายทะเบียนทั้งภาพ…");
+        return;
+      }
+      goneAt = 0; sc(false);
+      const r = r0, big = r.w / W >= 0.12;
+      box(trk, W, H, big && (stable >= 1 || !armed));
       if (!armed) { say("อ่านคันนี้ไปแล้ว — รอให้รถออกจากกรอบ"); return; }
       if (!big) { stable = 0; last = null; say("พบป้ายคล้ายทะเบียน — ยังไกลอยู่ รอให้เข้ามาใกล้อีก"); return; }
       const mv = last ? Math.hypot(r.x + r.w / 2 - last.x - last.w / 2, r.y + r.h / 2 - last.y - last.h / 2) / W : 1, gr = last ? Math.abs(r.w - last.w) / last.w : 1;

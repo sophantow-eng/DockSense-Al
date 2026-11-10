@@ -111,21 +111,23 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     let weak: any = null;
     const bUrl = (Deno.env.get("OCR_BACKEND_URL") || "").replace(/\/$/, ""), bKey = Deno.env.get("OCR_BACKEND_KEY") || "";
-    const tessReady = ctl.tesseract && !!bUrl && !!bKey;
+    // เครื่องยนต์ที่อนุญาตให้ backend ใช้ตามสวิตช์: tesseract / ai (AI ฝั่ง backend = EasyOCR บนคอมเครื่องแรง ถ้าตั้งไว้ · ไม่มี = backend ตอบ NOT_CONFIGURED ไม่แกล้งอ่านได้)
+    const bEngines = [ctl.tesseract ? "tesseract" : "", ctl.ai ? "ai" : ""].filter(Boolean).join(",");
+    const tessReady = !!bUrl && !!bKey && !!bEngines;
     if (tessReady) {
       try {
-        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg", "x-ocr-engines": "tesseract", "x-ocr-fallback": "0" }, body: bytes, signal: AbortSignal.timeout(8000) });
+        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg", "x-ocr-engines": bEngines, "x-ocr-fallback": ctl.auto_fallback ? "1" : "0" }, body: bytes, signal: AbortSignal.timeout(ctl.ai ? 15000 : 8000) });
         if (br.ok) {
           const b = await br.json();
           // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
           if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
-            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: "tesseract", known: b.known_vehicle === true };
+            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? "easyocr" : "tesseract", known: b.known_vehicle === true };
             ocrOk = true; viaBackend = true; ocrRes = { ok: true } as Response;
           } else if (b.found && b.plate) weak = b;
         }
-      } catch (_) { /* backend หลับ/ช้า */ }
+      } catch (_) { /* backend/คอมเครื่องแรงหลับ-ปิด-ช้า */ }
     }
-    const aiAllowed = ctl.ai && (!ctl.tesseract || !tessReady || ctl.auto_fallback);
+    const aiAllowed = ctl.ai && (!ctl.tesseract || !tessReady || ctl.auto_fallback);  // Gemini = ที่พึ่งสุดท้าย
     if (!ocrOk && aiAllowed) {
       ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
         method: "POST",
