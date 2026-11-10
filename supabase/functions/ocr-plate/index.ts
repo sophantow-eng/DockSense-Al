@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
       }
     }
     const msg = errors.join(" | ");
-    return json({ error: msg, code: msg.includes("API_KEY_INVALID") ? "API_KEY_INVALID" : "OCR_FAILED" }, 502);
+    return json({ error: msg, code: msg.includes("API_KEY_INVALID") ? "API_KEY_INVALID" : msg.includes("QUOTA_EXHAUSTED") ? "QUOTA_EXHAUSTED" : "OCR_FAILED" }, 502);
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e), code: "OCR_FAILED" }, 502);
   }
