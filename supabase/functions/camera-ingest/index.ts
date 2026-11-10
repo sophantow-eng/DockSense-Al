@@ -74,6 +74,14 @@ Deno.serve(async (req) => {
       return json({ ok: true, watch: watching, snap: wantSnap && !hd, next_ms: watching ? 300 : 15000 });
     }
 
+    // สวิตช์จากศูนย์ควบคุม (ตารางตั้งค่า ocr_control) — บังคับที่เซิร์ฟเวอร์ ไม่ใช่แค่ปุ่มในหน้าเว็บ
+    const { data: ctlRow } = await sb.from("app_settings").select("value").eq("key", "ocr_control").maybeSingle();
+    const ctl = { mode: "production", master: true, tesseract: true, ai: true, phone_camera: true, esp32_cam: true, sensor_trigger: true, auto_fallback: true, auto_save: true, ...(ctlRow?.value || {}) };
+    if (!ctl.master) return json({ ok: true, skipped: "master_off" });
+    if (isPhone ? !ctl.phone_camera : !ctl.esp32_cam) return json({ ok: true, skipped: isPhone ? "phone_camera_off" : "esp32_cam_off" });
+    if (ctl.mode === "testing") return json({ ok: true, skipped: "testing_mode" }); // โหมดทดสอบ: ไม่เขียนประวัติจริง
+    if (!ctl.tesseract && !ctl.ai) return json({ ok: true, skipped: "engines_off" });
+
     // กรองก่อนเรียก AI (ไม่เสียโควตา): เฟรมว่าง/มืด/เลนส์ถูกบัง (ไฟล์เล็กผิดปกติ) และภาพซ้ำเฟรมเดิม
     if (bytes.length < 9000) return json({ ok: true, skipped: "blank_frame", bytes: bytes.length });
     {
@@ -96,32 +104,38 @@ Deno.serve(async (req) => {
     const thP = sb.from("app_settings").select("value").eq("key", "ocr_thresholds").maybeSingle();
     const dropLater = () => bg(upP.then(() => sb.storage.from("plate-images").remove([path])).then(() => null, () => null));
 
-    // ผู้อ่านทะเบียน 2 ชั้น: (1) Python backend (OpenCV+EasyOCR) ถ้าตั้ง OCR_BACKEND_URL · มั่นใจพอ = ใช้เลย ไม่เรียก Gemini (ประหยัดโควตา)
-    // (2) ไม่ตั้ง/ช้า/ล้ม/ไม่มั่นใจ → ถอยไปใช้ ocr-plate (Gemini) เหมือนเดิม
+    // ผู้อ่านทะเบียนตามสวิตช์ในศูนย์ควบคุม (ocr_control): Tesseract (Python backend) เป็นตัวหลัก → AI (Gemini) เมื่อเปิดไว้และไม่ผ่าน
+    // ไม่มี backend/ปิดสวิตช์ = ไม่เรียก ไม่แกล้งทำเป็นสำเร็จ · ทะเบียนที่ไม่ผ่านเกณฑ์ = "รอตรวจสอบ" ไม่เดาเอง
     // deno-lint-ignore no-explicit-any
-    let ocr: any = {}; let ocrOk = false; let viaBackend = false;
+    let ocr: any = {}; let ocrOk = false; let viaBackend = false; let ocrRes = { ok: false } as Response;
+    // deno-lint-ignore no-explicit-any
+    let weak: any = null;
     const bUrl = (Deno.env.get("OCR_BACKEND_URL") || "").replace(/\/$/, ""), bKey = Deno.env.get("OCR_BACKEND_KEY") || "";
-    if (bUrl && bKey) {
+    const tessReady = ctl.tesseract && !!bUrl && !!bKey;
+    if (tessReady) {
       try {
-        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg" }, body: bytes, signal: AbortSignal.timeout(8000) });
+        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg", "x-ocr-engines": "tesseract", "x-ocr-fallback": "0" }, body: bytes, signal: AbortSignal.timeout(8000) });
         if (br.ok) {
           const b = await br.json();
-          // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) backend ผ่านให้ที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
+          // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
           if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
-            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: "easyocr", known: b.known_vehicle === true };
-            ocrOk = true; viaBackend = true;
-          }
+            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: "tesseract", known: b.known_vehicle === true };
+            ocrOk = true; viaBackend = true; ocrRes = { ok: true } as Response;
+          } else if (b.found && b.plate) weak = b;
         }
-      } catch (_) { /* backend หลับ/ช้า → ใช้ Gemini */ }
+      } catch (_) { /* backend หลับ/ช้า */ }
     }
-    let ocrRes = { ok: ocrOk } as Response;
-    if (!ocrOk) {
+    const aiAllowed = ctl.ai && (!ctl.tesseract || !tessReady || ctl.auto_fallback);
+    if (!ocrOk && aiAllowed) {
       ocrRes = await fetch(`${url}/functions/v1/ocr-plate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" },
         body: JSON.stringify({ imageBase64: encodeBase64(bytes), mediaType: "image/jpeg" }),
       });
       ocr = await ocrRes.json().catch(() => ({}));
+    } else if (!ocrOk) {
+      ocrRes = { ok: true } as Response;
+      ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: "tesseract" } : { found: false };
     }
     if (!ocrRes.ok) {
       // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
@@ -152,7 +166,7 @@ Deno.serve(async (req) => {
 
     // 3) บันทึก
     let visitId: string | null = null, status: string, vehicleId: string | null = null;
-    if ((conf >= high || ocr.known === true) && !ocr.needs_review) {
+    if (ctl.auto_save && (conf >= high || ocr.known === true) && !ocr.needs_review) {
       // ทะเบียนเก่า: ผูกกับรถที่ลงทะเบียนไว้ทันที (backend ไม่ส่งจังหวัด → ไม่ให้สร้างรถซ้ำ)
       let knownId: string | null = null, knownProv: string | null = ocr.province ?? null;
       if (viaBackend) {
@@ -189,7 +203,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ visit_id: visitId, force: true }),
     }).catch(() => null));
     const notified = "queued";
-    return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, engine: viaBackend ? "backend" : "gemini", notified });
+    return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, engine: ocr.provider ?? (viaBackend ? "tesseract" : "gemini"), notified });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

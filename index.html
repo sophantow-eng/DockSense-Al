@@ -617,6 +617,105 @@ function guideSheet() {
   <button id="gOk" type="button" style="width:100%;margin-top:12px">เข้าใจแล้ว</button>`);
   m.querySelector("#gOk").onclick = () => m.remove();
 }
+/* ---------- ศูนย์ควบคุมการอ่านทะเบียน (เฉพาะผู้ดูแล): สวิตช์จริง + โหมดทดสอบแยกเครื่องยนต์ ---------- */
+const OCC_DEF = { mode: "production", master: true, tesseract: true, ai: true, phone_camera: true, esp32_cam: true, sensor_trigger: true, auto_fallback: true, auto_save: true };
+const OCC_SW = [
+  ["master", "สวิตช์หลัก (Master)", "ปิด = หยุดอ่านทะเบียนทุกช่องทาง"],
+  ["tesseract", "Tesseract (ตัวหลัก)", "อ่านบนเซิร์ฟเวอร์ Python ไม่เสียโควตา AI"],
+  ["ai", "AI (Gemini / ตัวสำรอง)", "ใช้โควตาฟรีของ Gemini"],
+  ["auto_fallback", "สลับไป AI อัตโนมัติ", "เมื่อ Tesseract ไม่ผ่านเกณฑ์"],
+  ["phone_camera", "กล้องมือถือ", "ปิด = มือถือส่งภาพเข้าระบบไม่ได้"],
+  ["esp32_cam", "กล้อง ESP32-CAM", "ปิด = ไม่รับภาพจากกล้องบอร์ด"],
+  ["sensor_trigger", "เซนเซอร์ปลุกกล้อง", "บันทึกการตั้งค่าไว้ — เฟิร์มแวร์ยังไม่ได้อ่านค่านี้"],
+  ["auto_save", "บันทึกอัตโนมัติ", "ปิด = ทุกรายการเข้า “รอตรวจสอบ”"],
+];
+let occ = { ...OCC_DEF }, occSt = null;
+const b64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("อ่านไฟล์ภาพไม่ได้")); r.readAsDataURL(blob); });
+async function toJpegBlob(src, max = 1280) {
+  const bm = await createImageBitmap(src), k = Math.min(1, max / Math.max(bm.width, bm.height));
+  const c = document.createElement("canvas"); c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k);
+  c.getContext("2d").drawImage(bm, 0, 0, c.width, c.height);
+  return await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
+}
+const occBadge = (s) => { const m = { READY: ["พร้อม", "ok"], DONE: ["อ่านได้", "ok"], OFF: ["ปิด", ""], OFFLINE: ["ออฟไลน์", "warn"], NOT_CONFIGURED: ["ยังไม่ตั้งค่า", "warn"], ERROR: ["ผิดพลาด", "warn"], BUSY: ["ไม่ว่าง", "warn"], NO_PLATE: ["ไม่พบป้าย", "warn"], SKIPPED: ["ข้าม", ""], UNAVAILABLE: ["ใช้ไม่ได้", "warn"] }[s] || [s || "-", ""]; return `<span class="badge ${m[1]}">${esc(m[0])}</span>`; };
+function occResultCard(title, r) {
+  if (!r) return `<div class="card" style="margin:0"><h3>${title}</h3><p class="muted" style="margin:0">ไม่ได้รันในโหมดนี้</p></div>`;
+  const conf = r.confidence != null ? Math.round(Number(r.confidence) * 100) + "%" : "-";
+  return `<div class="card" style="margin:0;min-width:0"><div class="row sp"><h3 style="margin:0">${title}</h3>${occBadge(r.state)}</div>
+  ${r.plate ? `<div class="plate wrapsafe" style="margin:8px 0">${esc(r.plate)}</div>` : '<div class="muted" style="margin:8px 0">— ไม่มีทะเบียน —</div>'}
+  <div class="row sp"><span class="muted">ความมั่นใจ</span><span>${conf}</span></div>
+  <div class="row sp"><span class="muted">เวลาอ่านจริง</span><span>${r.ms != null ? (r.ms / 1000).toFixed(2) + " วิ" : "-"}</span></div>
+  <div class="row sp"><span class="muted">ผลตรวจ</span><span>${esc(r.status || "-")}</span></div>
+  <div class="row sp"><span class="muted">หน่วยความจำ</span><span>${r.detail && r.detail.rss_mb ? r.detail.rss_mb + " MB (เครื่อง backend)" : "ไม่มีข้อมูล"}</span></div>
+  ${r.error ? `<p class="muted wrapsafe" style="margin:8px 0 0">${esc(r.error)}</p>` : ""}</div>`;
+}
+async function occRefresh() {
+  try { const { data, error } = await db.functions.invoke("ocr-test", { body: { status: true } }); if (error) throw await DS.fnErr(error); occSt = data; if (data.ctl) occ = { ...OCC_DEF, ...data.ctl }; } catch (e) { occSt = { err: e.message }; }
+}
+function occStateOf(k) {
+  if (!occ.master) return "OFF";
+  if (k === "tesseract" || k === "ai") return !occ[k] ? "OFF" : occSt && occSt[k] ? occSt[k].state : "…";
+  return occ[k] ? "READY" : "OFF";
+}
+function occRender() {
+  const el = $("#occ"); if (!el) return;
+  const sw = OCC_SW.map(([k, t, d]) => {
+    const st = (k === "tesseract" || k === "ai") ? occBadge(occStateOf(k)) : `<span class="badge ${occ[k] && occ.master ? "ok" : ""}">${occ[k] ? "เปิด" : "ปิด"}</span>`;
+    return `<label class="row sp" style="gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:center"><span style="min-width:0"><b>${t}</b><br><span class="muted">${d}</span></span><span class="row" style="gap:8px;flex:none">${st}<input type="checkbox" class="occSw" data-k="${k}" ${occ[k] ? "checked" : ""} style="width:22px;height:22px"></span></label>`;
+  }).join("");
+  el.innerHTML = `<div class="card"><h3>ศูนย์ควบคุมการอ่านทะเบียน</h3>
+  ${occ.mode === "testing" ? '<p class="badge warn" style="display:block;margin:0 0 8px;white-space:normal">⚠️ โหมดทดสอบ: กล้องจริงจะ “ไม่บันทึกประวัติ” จนกว่าจะกลับไปโหมดใช้งานจริง</p>' : ""}
+  ${occSt && occSt.err ? `<p class="muted wrapsafe">อ่านสถานะเครื่องยนต์ไม่ได้: ${esc(occSt.err)}</p>` : ""}
+  <div class="row" style="gap:8px;margin-bottom:6px"><button type="button" class="${occ.mode === "production" ? "" : "ghost"} occMode" data-m="production" style="flex:1">ใช้งานจริง</button><button type="button" class="${occ.mode === "testing" ? "" : "ghost"} occMode" data-m="testing" style="flex:1">ทดสอบ</button></div>
+  ${sw}
+  <p class="muted" style="margin:8px 0 0">สวิตช์ถูกบังคับที่เซิร์ฟเวอร์ (ฟังก์ชันรับภาพตรวจค่านี้ทุกครั้ง) ไม่ใช่แค่ปุ่มในหน้านี้</p></div>
+  <div class="card"><h3>ทดสอบเทียบเครื่องยนต์</h3>
+  <p class="muted" style="margin:0 0 8px">ผลทดสอบไม่ถูกบันทึกเป็นประวัติรถ · โหมด AI ใช้โควตาฟรีของ Gemini</p>
+  <select id="occTm" style="width:100%"><option value="compare">เทียบกัน: Tesseract และ AI อ่านแยกกัน</option><option value="tesseract">Tesseract อย่างเดียว</option><option value="ai">AI อย่างเดียว</option><option value="fallback">ทดสอบสายจริง: Tesseract แล้วสลับไป AI</option></select>
+  <div class="row" style="gap:8px;margin-top:8px"><button type="button" class="ghost" id="occPick" style="flex:1">🖼️ เลือกภาพ</button><button type="button" class="ghost" id="occCam" style="flex:1">📷 ถ่ายจากกล้อง</button></div>
+  <input type="file" id="occFile" accept="image/*" class="hide">
+  <div id="occPrev" style="margin-top:8px"></div>
+  <button type="button" id="occRun" style="width:100%;margin-top:8px" disabled>เริ่มทดสอบ</button>
+  <div id="occOut" style="margin-top:10px"></div></div>`;
+  let blob = null;
+  const setBlob = async (src) => { try { blob = await toJpegBlob(src); $("#occPrev").innerHTML = `<img src="${URL.createObjectURL(blob)}" alt="ภาพทดสอบ" style="max-width:100%;max-height:220px;border-radius:8px">`; $("#occRun").disabled = false; } catch (e) { DS.toast("เปิดภาพไม่ได้", "error"); } };
+  el.querySelectorAll(".occSw").forEach((c) => (c.onchange = async () => {
+    const next = { ...occ, [c.dataset.k]: c.checked };
+    const { error } = await db.from("app_settings").upsert({ key: "ocr_control", value: next }, { onConflict: "key" });
+    if (error) { c.checked = !c.checked; DS.toast("บันทึกไม่ได้: " + error.message, "error"); return; }
+    occ = next; occRender(); DS.toast("บันทึกแล้ว");
+  }));
+  el.querySelectorAll(".occMode").forEach((b) => (b.onclick = async () => {
+    const next = { ...occ, mode: b.dataset.m };
+    const { error } = await db.from("app_settings").upsert({ key: "ocr_control", value: next }, { onConflict: "key" });
+    if (error) return DS.toast("บันทึกไม่ได้: " + error.message, "error");
+    occ = next; occRender();
+  }));
+  $("#occPick").onclick = () => $("#occFile").click();
+  $("#occFile").onchange = (e) => { const f = e.target.files[0]; if (f) setBlob(f); };
+  $("#occCam").onclick = async () => {
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }); } catch { return DS.toast("เปิดกล้องไม่ได้ (ต้องอนุญาตกล้อง และใช้ผ่าน https)", "error"); }
+    const m = DS.modal("ถ่ายภาพทะเบียน", '<video id="occV" autoplay playsinline muted style="width:100%;border-radius:8px;background:#000"></video><div class="row" style="gap:8px;margin-top:10px"><button id="occShot" type="button" style="flex:1">📸 ถ่าย</button><button id="occX" type="button" class="ghost" style="flex:1">ยกเลิก</button></div>');
+    const v = m.querySelector("#occV"); v.srcObject = stream;
+    const done = () => { stream.getTracks().forEach((t) => t.stop()); m.remove(); };
+    m.querySelector("#occX").onclick = done;
+    m.querySelector("#occShot").onclick = async () => { if (!v.videoWidth) return; const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0); const b = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.9)); done(); setBlob(b); };
+  };
+  $("#occRun").onclick = async () => {
+    if (!blob) return; const btn = $("#occRun"); btn.disabled = true; btn.textContent = "กำลังอ่าน…"; $("#occOut").innerHTML = spin;
+    try {
+      const { data, error } = await db.functions.invoke("ocr-test", { body: { mode: $("#occTm").value, imageBase64: await b64(blob) } });
+      if (error) throw await DS.fnErr(error);
+      const r = data.results || {}, m = data.mode;
+      $("#occOut").innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">${m !== "ai" ? occResultCard("Tesseract", r.tesseract) : ""}${m !== "tesseract" ? occResultCard("AI", r.ai) : ""}</div>
+      ${data.match === true ? '<p class="badge ok" style="display:block;margin:10px 0 0;white-space:normal">สองตัวอ่านได้ทะเบียนตรงกัน</p>' : data.match === false ? '<p class="badge warn" style="display:block;margin:10px 0 0;white-space:normal">สองตัวอ่านไม่ตรงกัน — ตรวจเทียบกับภาพจริงเอง</p>' : ""}
+      <p class="muted" style="margin:8px 0 0">ผลนี้เป็นภาพเดียว ใช้เทียบกันคร่าวๆ ได้ แต่ยังบอกความแม่นยำรวมไม่ได้ ต้องทดสอบหลายภาพที่รู้ทะเบียนจริง</p>`;
+    } catch (e) { $("#occOut").innerHTML = `<p class="muted wrapsafe">ทดสอบไม่สำเร็จ: ${esc(e.message)}</p>`; }
+    btn.disabled = false; btn.textContent = "เริ่มทดสอบ";
+  };
+}
+async function initOcc() { if (!DS.can(me, "admin") || !$("#occ")) return; occRender(); await occRefresh(); occRender(); }
 /* ---------- ศูนย์ AI: สถานะอุปกรณ์ + ผลอ่านทะเบียนจากข้อมูลจริง (ไม่อ้างความแม่นยำ ถ้ายังไม่มีเฉลย) ---------- */
 async function loadAI() {
   if (!$("#aic").innerHTML) $("#aic").innerHTML = spin;
@@ -633,7 +732,7 @@ async function loadAI() {
   const srcName = { phone: "กล้องมือถือ", camera: "ESP32-CAM", manual: "บันทึกเอง", esp32: "ESP32-CAM" };
   const devs = cs.data.map((c) => `<div class="camrow"><div style="min-width:0"><b class="wrapsafe">📷 ${esc(c.name)}</b><div class="muted"><span class="dot ${camOn(c) ? "on" : ""}"></span>${camOn(c) ? "ออนไลน์" : "ออฟไลน์"}${c.last_seen ? " · เห็นล่าสุด " + new Date(c.last_seen).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : " · ยังไม่เคยเชื่อมต่อ"}${c.last_plate ? " · ล่าสุด " + esc(c.last_plate) : ""}</div></div></div>`).join("");
   const off = cs.data.filter((c) => !camOn(c)).length;
-  $("#aic").innerHTML = `<button type="button" class="ghost" id="guideBtn" style="width:100%;margin-bottom:12px">📖 วิธีใช้ และมีอะไรใหม่</button><div class="card"><h3>สถานะอุปกรณ์</h3>${devs || '<p class="muted" style="margin:0">ยังไม่มีกล้อง ESP32 ลงทะเบียนไว้</p>'}
+  $("#aic").innerHTML = `<button type="button" class="ghost" id="guideBtn" style="width:100%;margin-bottom:12px">📖 วิธีใช้ และมีอะไรใหม่</button><div id="occ"></div><div class="card"><h3>สถานะอุปกรณ์</h3>${devs || '<p class="muted" style="margin:0">ยังไม่มีกล้อง ESP32 ลงทะเบียนไว้</p>'}
     <p class="muted" style="margin:8px 0 0">${cs.data.length ? (off ? `ออฟไลน์ ${off} จาก ${cs.data.length} ตัว` : "ทุกตัวออนไลน์") : ""} · สถานะเซนเซอร์และ DevKit ยังไม่ถูกส่งเข้าระบบ (รอเฟิร์มแวร์รุ่นถัดไป)</p></div>
   <div class="chips"><div><b>${n(rows.length)}</b><span>อ่าน 30 วัน</span></div><div><b>${n(review.length)}</b><span>ต้องตรวจสอบ</span></div><div><b>${avg == null ? "-" : Math.round(avg * 100) + "%"}</b><span>ความมั่นใจเฉลี่ย</span></div></div>
   <div class="card"><h3>ผลการอ่านทะเบียน (30 วัน)</h3>
@@ -643,7 +742,7 @@ async function loadAI() {
     ${Object.keys(bySrc).map((k) => `<div class="row sp"><span class="muted">ที่มา: ${esc(srcName[k] || k)}</span><span>${n(bySrc[k])}</span></div>`).join("")}
     <p class="muted" style="margin:10px 0 0">ตัวเลขนี้คือ “ความมั่นใจที่ AI รายงาน” ไม่ใช่ความแม่นยำจริง การวัดความแม่นยำต้องมีภาพทดสอบที่มีเฉลย (ยังไม่มีในระบบ)</p></div>
   <div class="card"><h3>คิวตรวจสอบ ${review.length ? `(${n(review.length)})` : ""}</h3>${review.length ? review.slice(0, 20).map(itemHtml).join("") : '<div class="empty">ไม่มีรายการค้าง</div>'}</div>`;
-  bindItems($("#aic"), review); $("#guideBtn").onclick = guideSheet;
+  bindItems($("#aic"), review); $("#guideBtn").onclick = guideSheet; initOcc();
 }
 /* ---------- home ---------- */
 function bars(data, color) {
