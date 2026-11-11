@@ -443,6 +443,7 @@ async function phoneCam() {
   q("#pcGo").onclick = async () => {
     const go = q("#pcGo"); if (running) return stop();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return DS.toast("เปิดกล้องไม่ได้ (ต้องใช้ HTTPS)", "error");
+    try { fetch("https://docksense-ocr.onrender.com/health", { mode: "no-cors", cache: "no-store" }); } catch (e) {} // ปลุกเซิร์ฟเวอร์ OCR ล่วงหน้า (ไม่รอผล)
     go.disabled = true; await rtAuth();
     try { await cam(); } catch (e) { DS.toast(e.name === "NotAllowedError" ? "ไม่ได้รับอนุญาตให้ใช้กล้อง" : "เปิดกล้องไม่ได้", "error"); go.disabled = false; return; }
     const name = (q("#pcName").value || defName).trim().slice(0, 30); q("#pcName").disabled = true;
