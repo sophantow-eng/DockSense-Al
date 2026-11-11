@@ -53,7 +53,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
   <main class="wrap">
     <section id="t-home"><h1>ภาพรวม</h1><div id="home"></div></section>
     <section id="t-history" class="hide">
-      <div class="row sp"><h1 style="margin:0">ประวัติทะเบียนรถ</h1><div class="row" style="flex:none"><button class="ghost" id="fToggle">กรอง</button><button class="ghost" id="csvBtn">CSV</button></div></div>
+      <div class="row sp"><h1 style="margin:0">ประวัติทะเบียนรถ</h1><div class="row" style="flex:none;gap:8px"><button class="ghost" id="fToggle">กรอง</button><button class="ghost" id="csvBtn">CSV</button></div></div>
       <div id="filters" class="card hide" style="margin-top:12px">
         <div class="grid g2">
           <div><label>เลขทะเบียน</label><input id="fp" placeholder="1กก1234"></div>
@@ -759,24 +759,44 @@ async function loadAI() {
   bindItems($("#aic"), review); $("#guideBtn").onclick = guideSheet; initOcc();
 }
 /* ---------- home ---------- */
-function bars(data, color) {
-  const max = Math.max(1, ...data.map((d) => d.count)), step = Math.ceil(data.length / 6) || 1;
-  return `<div class="bars">${data.map((d) => `<div class="bar" title="${esc(d.label)}: ${d.count} คัน"><i style="height:${(d.count / max) * 100}%"></i></div>`).join("")}</div><div class="axis">${data.map((d, i) => `<span>${i % step === 0 ? esc(d.label) : ""}</span>`).join("")}</div>`;
+function bars(data, unit) {
+  const max = Math.max(1, ...data.map((d) => d.count)), step = Math.ceil(data.length / 6) || 1, few = data.length <= 14;
+  return `<div class="chart"><div class="ymax">${max}</div><div class="bars">${data.map((d) => `<div class="bar" tabindex="0" style="--h:${(d.count / max) * 100}%" title="${esc(d.label)}: ${d.count} ${unit || "คัน"}">${d.count && (few || d.count === max) ? `<em>${d.count}</em>` : ""}<i style="height:${(d.count / max) * 100}%"></i></div>`).join("")}</div></div><div class="axis">${data.map((d, i) => `<span>${i % step === 0 ? esc(d.label) : ""}</span>`).join("")}</div>`;
+}
+const thDay = (d) => d.slice(0, 5); // "dd/mm"
+function insights(rows, d) {
+  const n = (v) => Number(v).toLocaleString("th-TH"), ok = rows.filter((r) => r.status !== "needs_review" && r.plate_number);
+  const byPlate = {}, byCo = {};
+  ok.forEach((r) => {
+    const p = byPlate[r.plate_number] || (byPlate[r.plate_number] = { plate: r.plate_number, n: 0, co: r.company_name || null, last: r.capture_at });
+    p.n++; if (!p.co && r.company_name) p.co = r.company_name; if (r.capture_at > p.last) p.last = r.capture_at;
+    const k = r.company_name || "ไม่ระบุบริษัท"; byCo[k] = (byCo[k] || 0) + 1;
+  });
+  const plates = Object.values(byPlate).sort((a, b) => b.n - a.n || (a.last < b.last ? 1 : -1)).slice(0, 8);
+  const cos = Object.entries(byCo).sort((a, b) => b[1] - a[1]).slice(0, 6), cmax = Math.max(1, ...cos.map((c) => c[1]));
+  const peak = (d.daily || []).reduce((m, x) => (x.count > (m ? m.count : 0) ? x : m), null), tot = (d.daily || []).reduce((a, x) => a + x.count, 0);
+  const sum = tot ? `30 วันนี้มีรถเข้า <b>${n(tot)}</b> คัน${peak ? ` · คึกคักสุดวันที่ ${esc(thDay(peak.label))} (${n(peak.count)} คัน)` : ""}` : "ยังไม่มีรถเข้าใน 30 วันนี้";
+  const trend = `<div class="card"><h3>รถเข้ามาเท่าไหร่</h3><p class="muted" style="margin:0 0 10px">${sum}</p>
+    <div class="seg" id="trSeg"><button type="button" data-k="daily" class="on">30 วัน</button><button type="button" data-k="monthly">12 เดือน</button><button type="button" data-k="yearly">รายปี</button></div><div id="trBox" style="margin-top:12px">${bars(d.daily)}</div></div>`;
+  const top = `<div class="card"><h3>ทะเบียนที่เข้าบ่อย <span class="muted" style="font-weight:400;font-size:13px">30 วัน</span></h3>${plates.length ? plates.map((p, i) => `<div class="rank" data-q="${esc(p.plate)}"><span class="no">${i + 1}</span><div class="mid"><span class="plate wrapsafe">${esc(p.plate)}</span><div class="muted wrapsafe">${p.co ? esc(p.co) : "ไม่ระบุบริษัท"}</div></div><b class="cnt">${n(p.n)}<small>ครั้ง</small></b></div>`).join("") : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>`;
+  const co = `<div class="card"><h3>แยกตามบริษัท <span class="muted" style="font-weight:400;font-size:13px">30 วัน</span></h3>${cos.length ? cos.map(([k, v]) => `<div class="hb"><div class="row sp"><span class="wrapsafe">${esc(k)}</span><b>${n(v)}</b></div><div class="track"><i style="width:${(v / cmax) * 100}%"></i></div></div>`).join("") : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>`;
+  return trend + top + co;
 }
 async function loadHome() {
   if (!$("#home").innerHTML) $("#home").innerHTML = spin;
   const since14 = new Date(Date.now() - 14 * 864e5).toISOString();
-  const [s, r, cs, ni] = await Promise.all([db.rpc("dashboard_stats"), db.from("visit_details").select("*").order("capture_at", { ascending: false }).limit(8), db.from("camera_status").select("*").eq("enabled", true).order("name"),
-    db.from("visit_details").select("vehicle_id,plate_number,capture_at,status").is("company_id", null).not("vehicle_id", "is", null).neq("status", "needs_review").gte("capture_at", since14).order("capture_at", { ascending: false }).limit(60)]);
+  const [s, r, cs, ni, ins] = await Promise.all([db.rpc("dashboard_stats"), db.from("visit_details").select("*").order("capture_at", { ascending: false }).limit(8), db.from("camera_status").select("*").eq("enabled", true).order("name"),
+    db.from("visit_details").select("vehicle_id,plate_number,capture_at,status").is("company_id", null).not("vehicle_id", "is", null).neq("status", "needs_review").gte("capture_at", since14).order("capture_at", { ascending: false }).limit(60),
+    db.from("visit_details").select("plate_number,company_name,capture_at,status").gte("capture_at", new Date(Date.now() - 30 * 864e5).toISOString()).order("capture_at", { ascending: false }).limit(1000)]);
   if (s.error || r.error) { $("#home").innerHTML = errBox((s.error || r.error).message, "loadHome()"); return; }
   const d = s.data, n = (v) => Number(v).toLocaleString("th-TH");
   const need = []; (ni.data || []).forEach((x) => { if (!need.some((y) => y.vehicle_id === x.vehicle_id)) need.push(x); });
   $("#home").innerHTML = greeting() + needInfoHtml(need) + camHome(cs.data || []) + `<div class="board"><div class="lbl">รถเข้าวันนี้</div><div class="big">${n(d.today_total)}<small>คัน</small></div><div class="sub">ทะเบียนไม่ซ้ำ <b>${n(d.today_unique)}</b> คัน</div></div>
   <div class="chips"><div><b>${n(d.month_total)}</b><span>เดือนนี้</span></div><div><b>${n(d.year_total)}</b><span>ปีนี้</span></div><div><b>${n(d.all_total)}</b><span>ทั้งหมด</span></div></div>
   <div class="card"><div class="row sp" style="align-items:baseline"><h3>รายการล่าสุด</h3><a href="#" id="seeAll" style="flex:none">ดูทั้งหมด</a></div>${r.data.length ? r.data.map(itemHtml).join("") : '<div class="empty">ยังไม่มีรายการ<br>กดปุ่ม “สแกนทะเบียน” เพื่อบันทึกคันแรก</div>'}</div>
-  <div class="card"><h3>จำนวนรถรายวัน (30 วัน)</h3>${bars(d.daily)}</div>
-  <div class="card"><h3>รายเดือน (12 เดือน)</h3>${bars(d.monthly)}</div>
-  <div class="card"><h3>สถิติรายปี</h3>${d.yearly.length ? bars(d.yearly) : '<div class="empty">ยังไม่มีข้อมูล</div>'}</div>`;
+  ${insights(ins.data || [], d)}`;
+  $("#trSeg").onclick = (e) => { const k = e.target.dataset && e.target.dataset.k; if (!k) return; document.querySelectorAll("#trSeg button").forEach((b) => b.classList.toggle("on", b === e.target)); $("#trBox").innerHTML = d[k] && d[k].length ? bars(d[k]) : '<div class="empty">ยังไม่มีข้อมูล</div>'; };
+  document.querySelectorAll(".rank").forEach((el) => el.onclick = () => { go("history"); const f = $("#fp"); if (f) { f.value = el.dataset.q; $("#filters").classList.remove("hide"); loadHistory(true); } });
   $("#seeAll").onclick = (e) => { e.preventDefault(); go("history"); };
   bindItems($("#home"), r.data); bindGreeting(); bindCamHome(cs.data || []); bindNeedInfo();
 }
