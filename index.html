@@ -8,7 +8,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <style>
 .co{display:flex;align-items:center;gap:8px;min-width:0}
@@ -394,10 +394,10 @@ async function phoneCam() {
   const uid = (me && me.id) || "u", id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)), defName = "มือถือ " + ((me.full_name || "").trim().split(/\s+/)[0] || "ของฉัน");
   const m = DS.modal("📱 ใช้มือถือเป็นกล้อง", `<p class="muted" style="margin-top:0">เครื่องนี้จะส่งภาพสดให้ทุกคนที่ล็อกอินเลือกดูได้ และกดถ่ายทะเบียนจากภาพนี้ได้ <b>เปิดหน้านี้ค้างไว้และไม่ล็อกหน้าจอ</b></p>
     <label>ชื่อกล้อง</label><input id="pcName" value="${esc(defName)}" maxlength="30">
-    <div class="camwrap" style="margin-top:10px"><video id="pcV" muted playsinline autoplay style="display:block;width:100%"></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcScan" class="scanline" style="display:none"></div><div id="pcBox" class="lockbox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
+    <div class="camwrap fit" style="margin-top:10px"><video id="pcV" muted playsinline autoplay></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcScan" class="scanline" style="display:none"></div><div id="pcBox" class="lockbox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
     <p class="muted" id="pcInfo" style="margin:8px 0 0"></p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="pcAuto" style="width:auto;min-height:0"> ถ่ายทะเบียนอัตโนมัติเมื่อเห็นป้ายเข้าใกล้และนิ่ง (ตรวจในเครื่อง ไม่เสียโควตา AI — เรียก AI เมื่อป้ายชัดแล้วเท่านั้น)</label><p class="muted" id="pcAuto2" style="margin:4px 0 0"></p>
-    <div class="row" style="margin-top:10px"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcNow" type="button">อ่านทะเบียนตอนนี้</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
+    <div class="actbar"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcNow" type="button">อ่านทะเบียนตอนนี้</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
   const q = (s) => m.querySelector(s);
   let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, beatT = null, autoT = null, sent = 0, t0 = Date.now();
   const cv = document.createElement("canvas");
