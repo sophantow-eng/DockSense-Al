@@ -67,6 +67,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
         </div>
         <button class="ghost" id="fclear" style="margin-top:10px;width:100%">ล้างตัวกรอง</button>
       </div>
+      <div class="seg tabs4" id="hviews" role="tablist" aria-label="มุมมองประวัติ" style="margin-top:12px"></div>
       <div class="muted" id="hcount" style="margin:10px 0"></div><div id="hlist"></div>
       <button class="ghost hide" id="more" style="width:100%">โหลดเพิ่ม</button>
     </section>
@@ -954,14 +955,79 @@ function applyF(q) {
   else if (s === "review") q = q.in("status", ["needs_review", "unmatched"]);
   return q;
 }
+/* มุมมองประวัติ 4 แบบ: ตามเวลา / ประเภทรถ / ทะเบียนซ้ำ / ยังไม่ระบุ — มุมมองจัดกลุ่มดึงข้อมูลสูงสุด 1,000 รายการล่าสุดตามตัวกรองที่เลือก */
+const HV = [["time", "ตามเวลา"], ["type", "ประเภทรถ"], ["plate", "ทะเบียนซ้ำ"], ["todo", "ไม่ระบุ"]];
+let hview = "time", hall = [], hrep = true, hmiss = "all", todoN = null;
+const HMAX = 1000, GSHOW = 30;
+function drawViews() {
+  $("#hviews").innerHTML = HV.map(([k, t]) => `<button type="button" data-v="${k}" role="tab" aria-selected="${k === hview}" class="${k === hview ? "on" : ""}">${t}${k === "todo" && todoN ? `<i class="cnt">${todoN > 99 ? "99+" : todoN}</i>` : ""}</button>`).join("");
+  $("#hviews").querySelectorAll("button").forEach((b) => (b.onclick = () => { hview = b.dataset.v; drawViews(); loadHistory(true); }));
+}
+const isMissing = (l) => ["needs_review", "unmatched"].includes(l.status) || !l.vehicle_type || (l.vehicle_id && !l.company_id);
+const missTags = (l) => [["needs_review", "unmatched"].includes(l.status) && "ต้องตรวจสอบ", !l.vehicle_type && "ไม่ระบุประเภท", l.vehicle_id && !l.company_id && "ไม่ระบุบริษัท"].filter(Boolean);
+function dayLabel(t) {
+  const d = new Date(t), n = new Date(), k = (x) => x.toISOString().slice(0, 10);
+  const loc = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  if (loc(d) === loc(n)) return "วันนี้"; const y = new Date(n); y.setDate(n.getDate() - 1); if (loc(d) === loc(y)) return "เมื่อวาน";
+  return DS.fmt.date(t);
+}
+const gHead = (title, sub, count, open) => `<summary class="ghd"><span class="gt wrapsafe">${title}${sub ? `<span class="muted gs">${sub}</span>` : ""}</span><span class="badge" style="flex:none">${count} ครั้ง</span></summary>`;
+function groupBlock(head, list, open) {
+  return `<details class="grp" ${open ? "open" : ""}>${head}<div class="gbody">${list.slice(0, GSHOW).map(itemHtml).join("")}${list.length > GSHOW ? `<div class="muted" style="padding:10px 0">แสดง ${GSHOW} รายการล่าสุดจากทั้งหมด ${list.length} · ดูครบได้ที่มุมมอง “ตามเวลา” โดยกรองทะเบียน</div>` : ""}</div></details>`;
+}
+function renderGrouped() {
+  const L = hall, box = $("#hlist"); let html = "", shown = L;
+  const tr = L.length >= HMAX ? ` · แสดงจาก ${HMAX.toLocaleString("th-TH")} รายการล่าสุด` : "";
+  if (hview === "type") {
+    const m = new Map(); L.forEach((l) => { const k = l.vehicle_type || ""; (m.get(k) || m.set(k, []).get(k)).push(l); });
+    const g = [...m.entries()].sort((a, b) => (a[0] === "") - (b[0] === "") || b[1].length - a[1].length);
+    $("#hcount").textContent = `${g.length} ประเภท · ${L.length.toLocaleString("th-TH")} รายการ${tr}`;
+    html = g.map(([k, v], i) => groupBlock(gHead(esc(k || "ไม่ระบุประเภท"), `${new Set(v.map((x) => x.plate_number)).size} ทะเบียน`, v.length), v, i === 0 && g.length < 4)).join("");
+  } else if (hview === "plate") {
+    const m = new Map(); L.forEach((l) => { const k = l.plate_norm || DS.norm(l.plate_number); (m.get(k) || m.set(k, []).get(k)).push(l); });
+    let g = [...m.values()].sort((a, b) => b.length - a.length || +new Date(b[0].capture_at) - +new Date(a[0].capture_at));
+    const rep = g.filter((v) => v.length > 1).length; if (hrep) g = g.filter((v) => v.length > 1);
+    $("#hcount").textContent = `${rep} ทะเบียนที่เข้ามามากกว่า 1 ครั้ง · ทั้งหมด ${m.size} ทะเบียน${tr}`;
+    html = `<label class="rowchk"><input type="checkbox" id="hrep" ${hrep ? "checked" : ""}> แสดงเฉพาะทะเบียนที่เข้ามาซ้ำ</label>` +
+      (g.length ? g.map((v) => groupBlock(gHead(`<span class="plate">${esc(v[0].plate_number)}</span>`, `ล่าสุด ${DS.fmt.ago(v[0].capture_at)}${v[0].vehicle_type ? " · " + esc(v[0].vehicle_type) : ""}`, v.length), v, false)).join("") : '<div class="empty">ยังไม่มีทะเบียนที่เข้ามาซ้ำ</div>');
+  } else {
+    const cnt = { all: L.filter(isMissing).length, review: L.filter((l) => ["needs_review", "unmatched"].includes(l.status)).length, type: L.filter((l) => !l.vehicle_type).length, co: L.filter((l) => l.vehicle_id && !l.company_id).length };
+    const f = { all: isMissing, review: (l) => ["needs_review", "unmatched"].includes(l.status), type: (l) => !l.vehicle_type, co: (l) => l.vehicle_id && !l.company_id }[hmiss];
+    shown = L.filter(f);
+    $("#hcount").textContent = `${cnt.all.toLocaleString("th-TH")} รายการที่ยังข้อมูลไม่ครบ${tr}`;
+    const chips = [["all", "ทั้งหมด"], ["review", "ต้องตรวจสอบ"], ["type", "ไม่ระบุประเภท"], ["co", "ไม่ระบุบริษัท"]].map(([k, t]) => `<button type="button" class="fchip ${k === hmiss ? "on" : ""}" data-m="${k}">${t} <b>${cnt[k]}</b></button>`).join("");
+    html = `<div class="fchips">${chips}</div>` + (shown.length ? `<div class="card" style="padding:4px 14px">${shown.map((l) => itemHtml(l).replace('</div></div></div>', `</div>${missTags(l).length ? `<div class="miss">${missTags(l).map((t) => `<span class="badge warn">${t}</span>`).join("")}</div>` : ""}</div></div>`)).join("")}</div>` : '<div class="empty">ไม่มีรายการค้าง เรียบร้อยดี</div>');
+  }
+  box.innerHTML = html; bindItems(box, L);
+  box.querySelectorAll(".fchip").forEach((b) => (b.onclick = () => { hmiss = b.dataset.m; renderGrouped(); }));
+  const hr = $("#hrep"); if (hr) hr.onchange = () => { hrep = hr.checked; renderGrouped(); };
+  $("#more").classList.add("hide");
+}
+async function loadTodoCount() {
+  const { count } = await db.from("visit_details").select("id", { count: "exact", head: true }).in("status", ["needs_review", "unmatched"]);
+  if (count !== todoN) { todoN = count || 0; drawViews(); }
+}
 async function loadHistory(reset) {
+  if (!$("#hviews").children.length) drawViews();
+  if (hview !== "time") {
+    $("#hlist").innerHTML = spin; hall = [];
+    for (let o = 0; o < HMAX; o += 500) {
+      const { data, error } = await applyF(db.from("visit_details").select("*").order("capture_at", { ascending: false }).range(o, o + 499));
+      if (error) { $("#hlist").innerHTML = errBox(error.message, "loadHistory(true)"); return; }
+      hall = hall.concat(data); if (data.length < 500) break;
+    }
+    renderGrouped(); loadTodoCount(); return;
+  }
   if (reset) { $("#hlist").innerHTML = spin; rows = []; }
   const { data, count, error } = await applyF(db.from("visit_details").select("*", { count: "exact" }).order("capture_at", { ascending: false }).range(rows.length, rows.length + PAGE - 1));
   if (error) { $("#hlist").innerHTML = errBox(error.message, "loadHistory(true)"); return; }
   total = count || 0; rows = reset ? data : rows.concat(data);
   $("#hcount").textContent = `ทั้งหมด ${total.toLocaleString("th-TH")} รายการ`;
-  $("#hlist").innerHTML = rows.length ? `<div class="card" style="padding:4px 14px">${rows.map(itemHtml).join("")}</div>` : '<div class="empty">ไม่พบรายการ<br>ลองเปลี่ยนตัวกรอง หรือเริ่มสแกนทะเบียน</div>';
+  let last = "", out = "";
+  rows.forEach((l) => { const d = dayLabel(l.capture_at); if (d !== last) { out += `${last ? "</div>" : ""}<div class="dayhd">${esc(d)}</div><div class="card" style="padding:4px 14px;margin-bottom:10px">`; last = d; } out += itemHtml(l); });
+  $("#hlist").innerHTML = rows.length ? out + "</div>" : '<div class="empty">ไม่พบรายการ<br>ลองเปลี่ยนตัวกรอง หรือเริ่มสแกนทะเบียน</div>';
   bindItems($("#hlist"), rows); $("#more").classList.toggle("hide", rows.length >= total); $("#more").textContent = `โหลดเพิ่ม (${rows.length}/${total})`;
+  loadTodoCount();
 }
 $("#more").onclick = async (e) => { e.target.disabled = true; await loadHistory(false); e.target.disabled = false; };
 $("#csvBtn").onclick = async (e) => {
