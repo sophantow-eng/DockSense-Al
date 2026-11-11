@@ -121,7 +121,7 @@ Deno.serve(async (req) => {
           const b = await br.json();
           // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
           if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
-            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? "easyocr" : "tesseract", known: b.known_vehicle === true };
+            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? "easyocr" : "tesseract", known: b.known_vehicle === true, color: b.vehicle_color ?? null };
             ocrOk = true; viaBackend = true; ocrRes = { ok: true } as Response;
           } else if (b.found && b.plate) weak = b;
         }
@@ -137,7 +137,7 @@ Deno.serve(async (req) => {
       ocr = await ocrRes.json().catch(() => ({}));
     } else if (!ocrOk) {
       ocrRes = { ok: true } as Response;
-      ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: "tesseract" } : { found: false };
+      ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: "tesseract", color: weak.vehicle_color ?? null } : { found: false };
     }
     if (!ocrRes.ok) {
       // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
@@ -197,6 +197,8 @@ Deno.serve(async (req) => {
       if (error) { await drop(); return json({ error: error.message }, 500); }
       visitId = ins.id; status = "needs_review";
     }
+    // สีตัวรถโดยประมาณจากภาพ (ไม่ใช่ค่ายืนยัน) — บันทึกไว้กับรายการนี้ ล้มเหลวไม่กระทบการบันทึกทะเบียน
+    if (ocr.color && visitId) await sb.from("vehicle_logs").update({ vehicle_color: String(ocr.color).slice(0, 30) }).eq("id", visitId).then(() => null, () => null);
     if (!isPhone) await sb.from("camera_devices").update({ last_plate: ocr.plate }).eq("id", dev.id);
 
     // 4) แจ้ง Telegram เบื้องหลัง (ตอบกล้องทันที ไม่รอ Telegram; ล้มก็ไม่กระทบการบันทึก)

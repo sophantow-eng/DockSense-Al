@@ -162,6 +162,21 @@ def _final(results: dict) -> dict:
         out.update(status="NEEDS_REVIEW", needs_review=True, conflict=sorted(p for p in plates if p))
     return out
 
+def _color(images) -> dict:
+    """สีตัวรถโดยประมาณ (ค่าประมาณจากพื้นที่รอบป้าย ไม่ใช่ค่าแน่นอน) · ไม่ชัด/ผิดพลาด = None ไม่ทำให้การอ่านทะเบียนล้ม"""
+    try:
+        from . import color_utils
+        img = iu.decode(images[0])
+        if max(img.shape[:2]) > 1280:
+            import cv2
+            k = 1280 / max(img.shape[:2]); img = cv2.resize(img, None, fx=k, fy=k, interpolation=cv2.INTER_AREA)
+        blocks = iu.find_text_blocks(img, 1)
+        box = blocks[0][:4] if blocks else None
+        r = color_utils.estimate(img, box) if box else None
+        return {"vehicle_color": r["name"] if r else None, "color_confidence": r["confidence"] if r else None}
+    except Exception:  # noqa: BLE001
+        return {"vehicle_color": None, "color_confidence": None}
+
 def process(images: list[bytes], engines=("tesseract",), fallback: bool = True) -> dict:
     """ผลิตจริง: Tesseract ก่อน → (ผ่าน = จบ ไม่เรียก AI) → ไม่ผ่าน + เปิด fallback + AI พร้อม → AI
     engines คือสวิตช์ที่ "อนุญาต" ให้ใช้ · ปิดทั้งคู่ = ไม่ประมวลผล (ผู้เรียกต้องตอบ recognition_disabled)"""
@@ -179,4 +194,5 @@ def process(images: list[bytes], engines=("tesseract",), fallback: bool = True) 
     final["engines_used"] = [k for k, v in results.items() if v.get("status") not in ("UNAVAILABLE", "NOT_CONFIGURED")]
     final["ms"] = int((time.time() - t0) * 1000)
     final["quality_note"] = None
+    final.update(_color(images))
     return final

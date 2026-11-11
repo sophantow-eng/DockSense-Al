@@ -120,11 +120,11 @@ async def test(request: Request, mode: str = "compare", files: list[UploadFile] 
     def run():
         if mode in ("tesseract", "ai"):
             r = recognition_service.run_engine(mode, imgs)
-            return {"mode": mode, "results": {mode: r}, "final": None}
+            return {"mode": mode, "results": {mode: r}, "final": None, **recognition_service._color(imgs)}
         if mode == "compare":
             res = {n: recognition_service.run_engine(n, imgs) for n in ("tesseract", "ai")}
             a, b = res["tesseract"].get("plate_norm"), res["ai"].get("plate_norm")
-            return {"mode": mode, "results": res, "final": None, "match": (a == b) if a and b else None}
+            return {"mode": mode, "results": res, "final": None, "match": (a == b) if a and b else None, **recognition_service._color(imgs)}
         out = recognition_service.process(imgs, ("tesseract", "ai"), True)
         return {"mode": mode, "results": out.pop("engines"), "final": out}
 

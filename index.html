@@ -807,11 +807,18 @@ async function loadCompanies() {
 }
 const coOptions = (sel) => `<option value="">ไม่ระบุบริษัท</option>${companies.map((c) => `<option value="${esc(c.id)}" ${c.id === sel ? "selected" : ""}>${esc(c.company_name)}</option>`).join("")}<option value="${NEW_CO}">➕ เพิ่มบริษัทใหม่…</option>`;
 
+const COLOR_HEX = { "ดำ": "#1f2933", "ขาว": "#f4f4f2", "เทา/เงิน": "#9aa3ad", "แดง": "#d32f2f", "ส้ม": "#f57c00", "น้ำตาล": "#795548", "เหลือง": "#fbc02d", "เขียว": "#388e3c", "ฟ้า": "#4fc3f7", "น้ำเงิน": "#1e4fbf", "ม่วง/ชมพู": "#ab47bc" };
+/* สีรถ: สีที่ลงทะเบียนไว้ (ยืนยัน) มาก่อน · ไม่มี = สีที่ระบบประมาณจากภาพ (ติดป้าย "ประมาณ") */
+function colorTag(l) {
+  const reg = (l.vehicle_color || "").trim(), est = (l.detected_color || "").trim(), name = reg || est; if (!name) return "";
+  const hex = COLOR_HEX[name] || "transparent";
+  return `<span class="cdot" style="background:${hex}" aria-hidden="true"></span>${esc(name)}${!reg && est ? '<span class="muted" style="font-size:12.5px"> (ประมาณ)</span>' : ""}`;
+}
 function itemHtml(l) {
   const co = l.company_id ? `<div style="margin-top:4px">${coChip(l, 26)}</div>` : l.vehicle_id ? '<div style="margin-top:4px"><span class="badge warn">ไม่ระบุบริษัท</span></div>' : "";
   return `<div class="item" data-id="${l.id}" style="padding:12px 0;border-top:1px solid var(--line);align-items:flex-start">${DS.thumb(l.image_path)}
   <div style="flex:1;min-width:0"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="plate wrapsafe">${esc(l.plate_number)}</span>${stBadge(l.status)}</div>
-  <div class="muted wrapsafe">${esc(l.province || "-")} · ${esc(l.vehicle_type || "ไม่ระบุประเภท")}</div>${co}
+  <div class="muted wrapsafe">${esc(l.province || "-")} · ${esc(l.vehicle_type || "ไม่ระบุประเภท")}${colorTag(l) ? " · " + colorTag(l) : ""}</div>${co}
   <div class="muted">${DS.fmt.ago(l.capture_at)} · ${DS.fmt.date(l.capture_at)} ${DS.fmt.time(l.capture_at)}</div></div></div>`;
 }
 function bindItems(root, list) { DS.hydrateImages(root); root.querySelectorAll(".item[data-id]").forEach((el) => (el.onclick = () => showDetail(list.find((x) => x.id === el.dataset.id)))); }
@@ -876,7 +883,7 @@ async function showDetail(log, norm) {
   body.innerHTML = `<div class="row" style="flex-wrap:wrap"><span class="plate wrapsafe" style="flex:none">${esc(head.plate_number)}</span>${log ? stBadge(log.status) : ""}${conf != null ? `<span class="badge ${conf >= 85 ? "ok" : conf >= 60 ? "warn" : "bad"}" style="flex:none">ความมั่นใจ ${conf}%</span>` : ""}</div>
   ${log ? `<div style="margin:10px 0">${log.vehicle_id ? coChip(log, 32) : '<span class="badge warn">ยังไม่ผูกกับรถในระบบ</span>'}</div>` : ""}
   ${img ? `<div style="margin:12px 0">${img}</div>` : ""}
-  ${log ? `<div class="grid g2"><div><label>วันและเวลาที่ตรวจพบ</label>${DS.fmt.dateTime(log.capture_at)}</div><div><label>จังหวัด</label>${esc(log.province || "-")}</div><div><label>ประเภทรถ</label>${esc(log.vehicle_type || "-")}</div><div><label>หมายเหตุ</label>${esc(log.note || "-")}</div></div>` : ""}
+  ${log ? `<div class="grid g2"><div><label>วันและเวลาที่ตรวจพบ</label>${DS.fmt.dateTime(log.capture_at)}</div><div><label>จังหวัด</label>${esc(log.province || "-")}</div><div><label>ประเภทรถ</label>${esc(log.vehicle_type || "-")}</div><div><label>สีรถ</label>${colorTag(log) || "-"}</div><div><label>หมายเหตุ</label>${esc(log.note || "-")}</div></div>` : ""}
   <div class="card" style="margin:12px 0"><b>ตรวจพบทั้งหมด ${hist.length} ครั้ง</b> · ล่าสุด ${DS.fmt.dateTime(hist[0].capture_at)}</div>
   ${log ? `<div class="row" style="margin:0 0 12px;flex-wrap:wrap">${log.vehicle_id ? '<button class="ghost" id="dVeh">ดูรถคันนี้</button>' : w ? '<button id="dLink">ผูกกับรถ</button>' : ""}</div>` : ""}
   <b>ประวัติการตรวจพบ</b><div style="margin-top:6px">${hist.map((h) => `<div class="item" style="padding:6px 0;border-top:1px solid var(--line);cursor:default">${DS.thumb(h.image_path)}<div style="flex:1;min-width:0">${DS.fmt.dateTime(h.capture_at)}<div class="muted wrapsafe">${esc(h.note || "")}</div></div>${stBadge(h.status)}</div>`).join("")}</div>
