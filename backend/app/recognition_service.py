@@ -14,6 +14,8 @@ def _combine(parts):
     if pu.is_standard(joined):
         return joined, sum(cs) / len(cs)
     best = max(texts, key=lambda x: (pu.is_standard(x[0]), x[1]))
+    if not pu.is_standard(best[0]):   # ไม่ใช่รูปทะเบียนเต็ม (ได้แต่เลข/อักษรเดี่ยว) ห้ามมีความมั่นใจสูง
+        return best[0], min(best[1], 0.4)
     return best
 
 def read_frame(img, reader=None, variant_names=None) -> dict:

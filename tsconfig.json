@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "lib": [
+      "ES2019",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "strict": true,
+    "noEmitOnError": true,
+    "removeComments": false,
+    "outDir": ".",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "newLine": "lf"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "backend",
+    "supabase",
+    "docs",
+    "esp32"
+  ]
+}

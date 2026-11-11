@@ -1,0 +1,6 @@
+{
+  "name": "docksense-web",
+  "private": true,
+  "scripts": { "build": "tsc -p .", "check": "tsc -p . --noEmit" },
+  "devDependencies": { "typescript": "^5.6.0" }
+}

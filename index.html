@@ -88,6 +88,7 @@ window.addEventListener("unhandledrejection",function(e){show("Error: "+((e.reas
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="plate-detect.js"></script>
+<script src="live-governor.js"></script>
 <script>
 // ค่าโปรเจกต์ Supabase (publishable/anon key เปิดเผยในหน้าเว็บได้ เพราะข้อมูลถูกป้องกันด้วย Login + RLS)
 // ห้ามใส่ service_role key หรือ ANTHROPIC_API_KEY ในไฟล์นี้เด็ดขาด
@@ -399,13 +400,13 @@ async function phoneCam() {
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="pcAuto" style="width:auto;min-height:0"> ถ่ายทะเบียนอัตโนมัติเมื่อเห็นป้ายเข้าใกล้และนิ่ง (ตรวจในเครื่อง ไม่เสียโควตา AI — เรียก AI เมื่อป้ายชัดแล้วเท่านั้น)</label><p class="muted" id="pcAuto2" style="margin:4px 0 0"></p>
     <div class="actbar"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcNow" type="button">อ่านทะเบียนตอนนี้</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
   const q = (s) => m.querySelector(s);
-  let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, beatT = null, autoT = null, sent = 0, t0 = Date.now();
+  let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, beatT = null, autoT = null, offLv = null, sent = 0, t0 = Date.now();
   const cv = document.createElement("canvas");
   const grab = (w, qlt) => { const v = q("#pcV"); if (!v.videoWidth) return null; const k = Math.min(1, w / v.videoWidth); cv.width = Math.round(v.videoWidth * k); cv.height = Math.round(v.videoHeight * k); cv.getContext("2d").drawImage(v, 0, 0, cv.width, cv.height); return cv; };
   let flipAt = 0;
   async function cam() {
     if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; q("#pcV").srcObject = null; await new Promise((r) => setTimeout(r, 350)); } // มือถือบางรุ่นต้องรอให้กล้องเดิมปล่อยก่อน
-    const size = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    const size = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15 } };   // 15 fps พอสำหรับอ่านทะเบียน/ภาพสด · 30 fps ทำให้เครื่องร้อนเปล่าๆ
     const tries = [{ facingMode: { exact: facing }, ...size }, { facingMode: { ideal: facing }, ...size }];
     let got = null, lastErr = null;
     for (const v of tries) { try { got = await navigator.mediaDevices.getUserMedia({ video: v, audio: false }); break; } catch (e) { lastErr = e; if (e.name === "NotAllowedError") throw e; } }
@@ -424,9 +425,9 @@ async function phoneCam() {
     v.srcObject = stream; await v.play().catch(() => {}); q("#pcW").style.display = "none"; flipAt = Date.now();
     const f = q("#pcFlip"); if (f) f.textContent = facing === "user" ? "สลับเป็นกล้องหลัง" : "สลับเป็นกล้องหน้า";
   }
-  const info = () => { const i = q("#pcInfo"); if (i) i.textContent = !running ? "" : viewers ? `กำลังส่งภาพสด · มีคนดู ${viewers} คน` : "ออนไลน์แล้ว · ยังไม่มีคนเปิดดู (ประหยัดเน็ตอยู่)"; };
+  const info = () => { const i = q("#pcInfo"); if (i) i.textContent = !running ? "" : (viewers ? `กำลังส่งภาพสด · มีคนดู ${viewers} คน` : "ออนไลน์แล้ว · ยังไม่มีคนเปิดดู (ประหยัดเน็ตอยู่)") + (DSLive.note() ? " · " + DSLive.note() : ""); };
   async function stop() {
-    running = false; clearInterval(timer); clearInterval(beatT); clearInterval(autoT); db.from("phone_cams").delete().eq("id", id).then(() => {}, () => {}); if (wl) { wl.release().catch(() => {}); wl = null; }
+    running = false; DSLive.stop(timer); clearInterval(beatT); DSLive.stop(autoT); if (offLv) { offLv(); offLv = null; } db.from("phone_cams").delete().eq("id", id).then(() => {}, () => {}); if (wl) { wl.release().catch(() => {}); wl = null; }
     if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
     if (ch) db.removeChannel(ch); ch = null; m.remove();
   }
@@ -464,8 +465,8 @@ async function phoneCam() {
     let prev = null, changed = false, calm = 0, lastOcr = 0, ocrBusy = false;
     const say = (t) => { const e = q("#pcAuto2"); if (e) e.textContent = t; };
     // ตัวตรวจป้ายคล้ายทะเบียน (ในเครื่อง ไม่เสียโควตา): เห็นป้าย → ใหญ่พอ → นิ่ง → เลือกเฟรมคมสุด → ตัดเฉพาะป้ายส่งให้ AI
-    const DW = 400, dc = document.createElement("canvas"), dctx = dc.getContext("2d", { willReadFrequently: true });
-    const grayOf = (v) => { const k = DW / v.videoWidth; dc.width = DW; dc.height = Math.round(v.videoHeight * k); dctx.drawImage(v, 0, 0, dc.width, dc.height); const d = dctx.getImageData(0, 0, dc.width, dc.height).data, g = new Uint8Array(dc.width * dc.height); for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8; return { g, W: dc.width, H: dc.height }; };
+    const dc = document.createElement("canvas"), dctx = dc.getContext("2d", { willReadFrequently: true });
+    const grayOf = (v) => { const DW = DSLive.cfg.detectW, k = DW / v.videoWidth; dc.width = DW; dc.height = Math.round(v.videoHeight * k); dctx.drawImage(v, 0, 0, dc.width, dc.height); const d = dctx.getImageData(0, 0, dc.width, dc.height).data, g = new Uint8Array(dc.width * dc.height); for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8; return { g, W: dc.width, H: dc.height }; };
     const box = (r, W, H, ok) => { const b = q("#pcBox"); if (!b) return; if (!r) { b.style.display = "none"; return; } b.style.display = "block"; b.style.left = (r.x / W * 100) + "%"; b.style.top = (r.y / H * 100) + "%"; b.style.width = (r.w / W * 100) + "%"; b.style.height = (r.h / H * 100) + "%"; b.style.borderColor = ok ? "#22c55e" : "#f59e0b"; };
     // r = ตำแหน่งป้ายในภาพเล็ก; คืนรูปตัดเฉพาะป้าย (เผื่อขอบ) ความละเอียดจากกล้องจริง — เล็กกว่าและชัดกว่าส่งภาพเต็ม
     const cropBlob = (r, W, H, ratioH) => new Promise((ok) => {
@@ -496,7 +497,7 @@ async function phoneCam() {
     };
     q("#pcNow").onclick = () => { if (!running || ocrBusy) return; doOcr(null); armed = false; };
     let armed = true, stable = 0, last = null, goneAt = 0, grabbing = false, trk = null, seenAt = 0;
-    autoT = setInterval(async () => {
+    autoT = DSLive.loop("detect", { pauseHidden: true, everyMs: () => DSLive.cfg.detectMs, run: async () => {
       const on = q("#pcAuto") && q("#pcAuto").checked; if (!on) { box(null); const sx = q("#pcScan"); if (sx) sx.style.display = "none"; trk = null; return; }
       if (!running || ocrBusy || grabbing) return; const v = q("#pcV"); if (!v.videoWidth) return;
       if (Date.now() - flipAt < 2500) { last = null; stable = 0; return; }
@@ -532,13 +533,14 @@ async function phoneCam() {
       grabbing = false; armed = false; stable = 0; last = null;
       if (bestS < 40) { say("ภาพยังเบลอ/มืดเกินไป — ไม่เรียก AI (ลองเพิ่มแสงหรือถือให้นิ่ง)"); armed = true; return; }
       doOcr(bestBlob);
-    }, 250);
+    } });
     document.addEventListener("visibilitychange", async () => { if (!document.hidden && running && !wl && navigator.wakeLock) { try { wl = await navigator.wakeLock.request("screen"); } catch (_) {} } });
-    timer = setInterval(async () => {
+    timer = DSLive.loop("stream", { pauseHidden: true, everyMs: () => DSLive.cfg.streamMs, run: async () => {
       if (!running || busy || !viewers || !stream) return; busy = true;
-      try { const c = grab(960); if (c) { await ch.send({ type: "broadcast", event: "frame", payload: { b: c.toDataURL("image/jpeg", 0.6).slice(23), t: Date.now() } }); sent++; } } catch (_) {}
+      try { const c = grab(DSLive.cfg.streamW); if (c) { await ch.send({ type: "broadcast", event: "frame", payload: { b: await DSLive.jpegB64(c, DSLive.cfg.streamQ), t: Date.now() } }); sent++; } } catch (_) {}
       busy = false;
-    }, 170);
+    } });
+    offLv = DSLive.onLevel((lv, c) => { const tr = stream && stream.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ frameRate: { ideal: c.fps } }).catch(() => {}); info(); });
   };
 }
 

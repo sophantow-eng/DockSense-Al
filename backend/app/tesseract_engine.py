@@ -184,14 +184,20 @@ def read(img) -> list[tuple[str, float]]:
         t, keep = pu.extract_standard(r[0])
         if t:
             c = r[1] * keep
+            if not pu.is_standard(t):   # ไม่ใช่รูปทะเบียนเต็ม (เช่น ได้แต่เลข/อักษรเดี่ยว) = ไม่เชื่อ เพดาน 0.4
+                c = min(c, 0.4)
             votes[t] += c; confs[t].append(c)
-        if n == 1 and t and pu.is_standard(t) and keep == 1.0 and r[1] >= config.HIGH_CONF:
-            break   # ชัดแล้ว ไม่ต้องเสียเวลาอ่านซ้ำ
     if not votes:
         return []
     best = max(votes, key=lambda k: (pu.is_standard(k), votes[k]))
-    agree = len(confs[best]) / max(1, n)
-    return [(best, round(sum(confs[best]) / len(confs[best]) * (0.5 + 0.5 * agree), 3))]
+    k = len(confs[best])
+    agree = k / max(1, n)
+    conf = sum(confs[best]) / k * (0.5 + 0.5 * agree)
+    # ทะเบียนต้องแม่นสุด: ผลที่ "อ่านซ้ำได้ตรงกันอย่างน้อย 2 ครั้ง" เท่านั้นจึงได้ความมั่นใจสูงพอผ่านเกณฑ์ยืนยัน
+    # อ่านได้ครั้งเดียว/ไม่ตรงกัน/หมดงบเวลาก่อนอ่านซ้ำ = เพดาน 0.8 (ต่ำกว่าเกณฑ์ = รอตรวจสอบ ไม่ใช่ยืนยันอัตโนมัติ)
+    if k < 2:
+        conf = min(conf, 0.8)
+    return [(best, round(conf, 3))]
 
 def _read_legacy(img) -> list[tuple[str, float]]:
     import cv2

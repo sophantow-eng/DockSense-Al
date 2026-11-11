@@ -2,8 +2,8 @@
    กติกาความปลอดภัย: แตะเฉพาะไฟล์ของเว็บเราเอง (same-origin GET) — ไม่แตะ Supabase / ฟังก์ชัน / รูปป้าย / realtime
    โค้ด (html/js/css) = เอาจากเน็ตก่อน (ได้เวอร์ชันล่าสุดเสมอ) ถ้าเน็ตช้า/หลุดใช้ของในเครื่อง
    ไอคอน/โลโก้ = ใช้ของในเครื่องก่อน (ไม่เปลี่ยนบ่อย) */
-const V = "ds-v4";
-const SHELL = ["./", "index.html", "scan.html", "style.css", "common.js", "plate-detect.js", "config.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon.svg", "logo.svg", "apple-touch-icon.png"];
+const V = "ds-v5";
+const SHELL = ["./", "index.html", "scan.html", "style.css", "common.js", "plate-detect.js", "live-governor.js", "config.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon.svg", "logo.svg", "apple-touch-icon.png"];
 const NET_TIMEOUT = 4000;
 
 self.addEventListener("install", (e) => {
