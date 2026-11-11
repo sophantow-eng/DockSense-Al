@@ -645,6 +645,16 @@ const OCC_SW = [
 ];
 let occ = { ...OCC_DEF }, occSt = null;
 const b64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(new Error("อ่านไฟล์ภาพไม่ได้")); r.readAsDataURL(blob); });
+// ย่อภาพก่อนอัปโหลด (ด้านยาวสุด ≤ max px) — ส่งเร็วขึ้น และเซิร์ฟเวอร์ย่อเหลือ ≤1280 อยู่แล้ว จึงไม่เสียความแม่น
+async function shrinkJpeg(blob, max) {
+  try {
+    const bm = await createImageBitmap(blob), k = Math.min(1, max / Math.max(bm.width, bm.height));
+    if (k >= 1 && blob.size < 900000) return blob;
+    const c = document.createElement("canvas"); c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k);
+    c.getContext("2d").drawImage(bm, 0, 0, c.width, c.height);
+    return await new Promise((ok) => c.toBlob((b) => ok(b || blob), "image/jpeg", 0.88));
+  } catch (e) { return blob; }
+}
 async function toJpegBlob(src, max = 1280) {
   const bm = await createImageBitmap(src), k = Math.min(1, max / Math.max(bm.width, bm.height));
   const c = document.createElement("canvas"); c.width = Math.round(bm.width * k); c.height = Math.round(bm.height * k);
@@ -685,7 +695,7 @@ function occRender() {
   <p class="muted" style="margin:8px 0 0">สวิตช์ถูกบังคับที่เซิร์ฟเวอร์ (ฟังก์ชันรับภาพตรวจค่านี้ทุกครั้ง) ไม่ใช่แค่ปุ่มในหน้านี้</p></div>
   <div class="card"><h3>ทดสอบเทียบเครื่องยนต์</h3>
   <p class="muted" style="margin:0 0 8px">ผลทดสอบไม่ถูกบันทึกเป็นประวัติรถ · โหมด AI ใช้โควตาฟรีของ Gemini</p>
-  <select id="occTm" style="width:100%"><option value="compare">เทียบกัน: Tesseract และ AI อ่านแยกกัน</option><option value="tesseract">Tesseract อย่างเดียว</option><option value="ai">AI อย่างเดียว</option><option value="fallback">ทดสอบสายจริง: Tesseract แล้วสลับไป AI</option></select>
+  <select id="occTm" style="width:100%"><option value="tesseract">Tesseract อย่างเดียว</option><option value="ai">AI อย่างเดียว</option><option value="fallback">ทดสอบสายจริง: Tesseract แล้วสลับไป AI</option></select>
   <div class="row" style="gap:8px;margin-top:8px"><button type="button" class="ghost" id="occPick" style="flex:1">🖼️ เลือกภาพ</button><button type="button" class="ghost" id="occCam" style="flex:1">📷 ถ่ายจากกล้อง</button></div>
   <input type="file" id="occFile" accept="image/*" class="hide">
   <div id="occPrev" style="margin-top:8px"></div>
@@ -719,7 +729,7 @@ function occRender() {
   $("#occRun").onclick = async () => {
     if (!blob) return; const btn = $("#occRun"); btn.disabled = true; btn.textContent = "กำลังอ่าน…"; $("#occOut").innerHTML = spin;
     try {
-      const { data, error } = await db.functions.invoke("ocr-test", { body: { mode: $("#occTm").value, imageBase64: await b64(blob) } });
+      const { data, error } = await db.functions.invoke("ocr-test", { body: { mode: $("#occTm").value, imageBase64: await b64(await shrinkJpeg(blob, 1280)) } });
       if (error) throw await DS.fnErr(error);
       const r = data.results || {}, m = data.mode;
       $("#occOut").innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">${m !== "ai" ? occResultCard("Tesseract", r.tesseract) : ""}${m !== "tesseract" ? occResultCard("AI", r.ai) : ""}</div>

@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       if (!ctl.ai) return { state: "OFF" };
       const t0 = Date.now();
       try {
-        const r = await fetch(`${url}/functions/v1/ocr-plate`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ imageBase64: b64, mediaType: "image/jpeg" }) });
+        const r = await fetch(`${url}/functions/v1/ocr-plate`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ imageBase64: b64, mediaType: "image/jpeg" }), signal: AbortSignal.timeout(12000) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) return { state: j.code === "API_KEY_MISSING" ? "NOT_CONFIGURED" : "ERROR", error: j.error || `ocr ${r.status}`, ms: Date.now() - t0, detail: { code: j.code } };
         return { state: j.found ? "DONE" : "NO_PLATE", plate: j.plate ?? null, confidence: j.confidence ?? null, status: j.needs_review ? "NEEDS_REVIEW" : j.found ? "VERIFIED" : undefined, ms: Date.now() - t0, provider: j.provider, detail: { province: j.province, cached: j.cached } };
