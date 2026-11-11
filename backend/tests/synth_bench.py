@@ -8,22 +8,29 @@ FONT = "/usr/share/fonts/opentype/tlwg/Loma-Bold.otf"
 PROV = ["กรุงเทพมหานคร", "เชียงใหม่", "ชลบุรี", "ขอนแก่น", "นครราชสีมา"]
 CONS = "กขคงจชซดตทนบปพฟมยรลวสหอฮณฌ"
 
-def make(seed, scale=1.0, blur=0.0, noise=0.0, tilt=0.0, bg="car"):
+def make(seed, scale=1.0, blur=0.0, noise=0.0, tilt=0.0, bg="car", stack=False):
     r = random.Random(seed)
     plate = (r.choice(["", "", "1", "2", "3"]) + "".join(r.choice(CONS) for _ in range(r.choice([1, 2]))))
     num = str(r.randint(1, 9999))
     truth = plate + num
-    W, H = 440, 220
+    W, H = (440, 220) if not stack else (300, 300)
     im = Image.new("RGB", (W, H), (246, 246, 240)); d = ImageDraw.Draw(im)
     d.rectangle([3, 3, W - 4, H - 4], outline=(30, 30, 30), width=4)
     t = f"{plate} {num}"
+    if stack:   # ป้ายมอเตอร์ไซค์: อักษรบน · จังหวัดเล็ก · เลขล่างใหญ่
+        fa = ImageFont.truetype(FONT, 78); fn = ImageFont.truetype(FONT, 110); fp = ImageFont.truetype(FONT, 30)
+        w = d.textlength(plate, font=fa); d.text(((W - w) / 2, 8), plate, font=fa, fill=(20, 20, 25))
+        p = r.choice(PROV); w = d.textlength(p, font=fp); d.text(((W - w) / 2, 100), p, font=fp, fill=(20, 20, 25))
+        w = d.textlength(num, font=fn); d.text(((W - w) / 2, 150), num, font=fn, fill=(20, 20, 25))
+        t = None
     fs = 104
     f1 = ImageFont.truetype(FONT, fs)
-    while d.textlength(t, font=f1) > W - 50:   # ให้ข้อความพอดีป้าย (ไม่ให้ตัวอักษรล้นขอบ)
+    while t and d.textlength(t, font=f1) > W - 50:   # ให้ข้อความพอดีป้าย (ไม่ให้ตัวอักษรล้นขอบ)
         fs -= 4; f1 = ImageFont.truetype(FONT, fs)
     f2 = ImageFont.truetype(FONT, 40)
-    w = d.textlength(t, font=f1); d.text(((W - w) / 2, 20), t, font=f1, fill=(20, 20, 25))
-    p = r.choice(PROV); w = d.textlength(p, font=f2); d.text(((W - w) / 2, 150), p, font=f2, fill=(20, 20, 25))
+    if t:
+        w = d.textlength(t, font=f1); d.text(((W - w) / 2, 20), t, font=f1, fill=(20, 20, 25))
+        p = r.choice(PROV); w = d.textlength(p, font=f2); d.text(((W - w) / 2, 150), p, font=f2, fill=(20, 20, 25))
     pl = np.array(im)[:, :, ::-1]
     if tilt:
         M = cv2.getRotationMatrix2D((W / 2, H / 2), tilt, 1); pl = cv2.warpAffine(pl, M, (W, H), borderMode=cv2.BORDER_REPLICATE)
@@ -42,7 +49,7 @@ def make(seed, scale=1.0, blur=0.0, noise=0.0, tilt=0.0, bg="car"):
     ok, buf = cv2.imencode(".jpg", scene, [cv2.IMWRITE_JPEG_QUALITY, 70])
     return buf.tobytes(), truth
 
-CONDS = {"clean": dict(scale=1.0), "small": dict(scale=0.55), "blur": dict(scale=0.8, blur=1.6), "noisy": dict(scale=0.8, noise=14), "tilt": dict(scale=0.8, tilt=6), "hard": dict(scale=0.55, blur=1.2, noise=10, tilt=4)}
+CONDS = {"clean": dict(scale=1.0), "small": dict(scale=0.55), "blur": dict(scale=0.8, blur=1.6), "noisy": dict(scale=0.8, noise=14), "tilt": dict(scale=0.8, tilt=6), "hard": dict(scale=0.55, blur=1.2, noise=10, tilt=4), "moto": dict(scale=0.55, stack=True), "moto_blur": dict(scale=0.5, stack=True, blur=1.0)}
 
 def run(read_fn, n=12):
     tot = {}

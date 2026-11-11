@@ -23,6 +23,7 @@ RATE_PER_MIN = int(_f("RATE_PER_MIN", 60))
 # Tesseract (ตัวหลัก)
 TESS_LANG = os.environ.get("TESS_LANG", "tha")
 TESS_TIMEOUT = int(_f("TESS_TIMEOUT", 15))
+TESS_BUDGET = _f("TESS_BUDGET", 9)               # งบเวลาอ่านต่อภาพ (วินาที) หมดแล้วใช้ผลที่ได้ ไม่ปล่อยให้หมดเวลาทั้งงาน
 OCR_CONCURRENCY = int(_f("OCR_CONCURRENCY", 1))   # งาน OCR พร้อมกัน (Render ฟรี CPU น้อย → 1)
 OCR_QUEUE_WAIT = _f("OCR_QUEUE_WAIT", 6)          # รอคิวสูงสุดกี่วินาที เกินแล้วตอบ busy (ไม่สะสมคิวไม่จำกัด)
 # AI (ตัวสำรอง)

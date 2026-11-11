@@ -37,7 +37,7 @@ def read_frame(img, reader=None, variant_names=None) -> dict:
             # ทางลัดรถเก่า: อ่านตรงทะเบียนที่ลงไว้ + มั่นใจสูง → ไม่ต้องลองปรับภาพแบบอื่น (ประหยัดเวลา)
             if text in known and conf >= config.KNOWN_EARLY:
                 break
-            if variant_names and pu.is_standard(text) and conf >= config.HIGH_CONF:   # ตัวช้า (Tesseract): ได้ผลดีแล้วไม่ต้องลองแบบอื่น
+            if variant_names and pu.is_standard(text):   # ตัวช้า (Tesseract): ได้รูปทะเบียนแล้วไม่ลองแบบอื่น (CPU ฟรีช้า ประหยัดเวลา)
                 break
     best = max(cands, key=lambda c: (c["std"], c["conf"]), default=None)
     return {"fp": iu.fingerprint(img), "quality": q, "plate_box": box[:4] if box else None,

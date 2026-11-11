@@ -44,10 +44,10 @@ def find_plate(img):
         if h < 12 or w < 40: continue
         ar = w / h
         area = w * h / (W * H)
-        if not (1.8 <= ar <= 5.0 and 0.004 <= area <= 0.6): continue
+        if not (0.85 <= ar <= 5.0 and 0.004 <= area <= 0.6): continue   # 0.85–1.8 = ป้ายมอเตอร์ไซค์ซ้อนสองแถว
         fill = cv2.contourArea(c) / (w * h)
         dens = float(edges[y:y + h, x:x + w].mean()) / 255
-        score = 0.5 * min(1, dens * 6) + 0.3 * fill + 0.2 * (1 - abs(ar - 3.2) / 3.2)
+        score = 0.5 * min(1, dens * 6) + 0.3 * fill + 0.2 * max(0.0, 1 - min(abs(ar - 3.2), abs(ar - 1.2)) / 3.2)
         if best is None or score > best[4]:
             best = (x, y, w, h, score)
     return best
