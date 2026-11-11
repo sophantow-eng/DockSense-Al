@@ -24,21 +24,35 @@ def read_frame(img, reader=None, variant_names=None) -> dict:
     if max(H0, W0) > 1280:   # ภาพใหญ่เกินจำเป็น: ย่อก่อนหาป้าย (เร็วขึ้นมากบน CPU ฟรี) ตัวอักษรป้ายยังใหญ่พอ
         import cv2
         k = 1280 / max(H0, W0); img = cv2.resize(img, None, fx=k, fy=k, interpolation=cv2.INTER_AREA)
+    slow = bool(variant_names)   # Tesseract: ไล่หลายตำแหน่ง/หลายแบบภาพจนได้รูปทะเบียนแล้วหยุด
+    blocks = iu.find_text_blocks(img, 3 if slow else 1)
+    targets = []
+    for bx in blocks:   # ตำแหน่งจากตัวอักษรที่เรียงเป็นแถว (หมุนให้ตรงถ้าป้ายเอียง)
+        cr = iu.crop(img, bx, pad=0.0)
+        ang = bx[5] if abs(bx[5]) >= 2 else iu.estimate_skew(cr)   # มุมจากแนวตัวอักษร ถ้าไม่ชัดใช้โปรไฟล์ความเข้ม
+        targets.append((bx, iu.deskew(cr, ang)))
     box = iu.find_plate(img)
-    target = iu.crop(img, box) if box else img
+    if box:
+        targets.append((box, iu.crop(img, box)))
+    if not targets:
+        targets.append((None, img))
     cands = []
     known = known_plates.get()
-    for name, v in iu.variants(target).items():
-        if variant_names and name not in variant_names:
-            continue
-        text, conf = _combine(reader(v))
-        if text:
-            cands.append({"variant": name, "text": text, "conf": conf, "std": pu.is_standard(text)})
-            # ทางลัดรถเก่า: อ่านตรงทะเบียนที่ลงไว้ + มั่นใจสูง → ไม่ต้องลองปรับภาพแบบอื่น (ประหยัดเวลา)
-            if text in known and conf >= config.KNOWN_EARLY:
-                break
-            if variant_names and pu.is_standard(text):   # ตัวช้า (Tesseract): ได้รูปทะเบียนแล้วไม่ลองแบบอื่น (CPU ฟรีช้า ประหยัดเวลา)
-                break
+    done = False
+    for bx, target in targets:
+        for name, v in iu.variants(target).items():
+            if variant_names and name not in variant_names:
+                continue
+            text, conf = _combine(reader(v))
+            if text:
+                cands.append({"variant": name, "text": text, "conf": conf, "std": pu.is_standard(text)})
+                if text in known and conf >= config.KNOWN_EARLY:
+                    done = True; break
+                if slow and pu.is_standard(text):
+                    done = True; break
+        if done or (not slow and cands):
+            break
+    box = targets[0][0]
     best = max(cands, key=lambda c: (c["std"], c["conf"]), default=None)
     return {"fp": iu.fingerprint(img), "quality": q, "plate_box": box[:4] if box else None,
             "raw": [c["text"] for c in cands], "best": best, "ms": int((time.time() - t0) * 1000)}
