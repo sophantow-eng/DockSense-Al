@@ -20,6 +20,10 @@ def read_frame(img, reader=None, variant_names=None) -> dict:
     reader = reader or ocr_service.read
     t0 = time.time()
     q = iu.quality(img)
+    H0, W0 = img.shape[:2]
+    if max(H0, W0) > 1280:   # ภาพใหญ่เกินจำเป็น: ย่อก่อนหาป้าย (เร็วขึ้นมากบน CPU ฟรี) ตัวอักษรป้ายยังใหญ่พอ
+        import cv2
+        k = 1280 / max(H0, W0); img = cv2.resize(img, None, fx=k, fy=k, interpolation=cv2.INTER_AREA)
     box = iu.find_plate(img)
     target = iu.crop(img, box) if box else img
     cands = []

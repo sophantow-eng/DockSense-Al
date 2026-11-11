@@ -30,3 +30,19 @@ def char_similarity(a: str, b: str) -> float:
             cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
         prev = cur
     return 1 - prev[-1] / max(len(a), len(b))
+
+_FIND = re.compile(rf"[0-9]?[{THAI_CONS}]{{1,2}}[0-9]{{1,4}}")
+
+def extract_standard(text: str) -> tuple[str, float]:
+    """ตัดตัวอักษรขยะหัว/ท้าย (เส้นขอบป้าย ชิ้นส่วนบรรทัดจังหวัด) ออก เหลือส่วนที่เป็นรูปทะเบียนที่ยาวที่สุด
+    ไม่แก้/เปลี่ยนตัวอักษรใดเลย · คืน (ข้อความ, สัดส่วนที่เก็บไว้ 0..1) — ตัดมากเท่าไรความมั่นใจยิ่งถูกลดตามสัดส่วน
+    ไม่พบรูปทะเบียน = คืนข้อความเดิม สัดส่วน 1.0 (ปล่อยให้ผู้เรียกตัดสินว่าไม่ใช่รูปมาตรฐาน)"""
+    t = clean(text)
+    if not t or is_standard(t):
+        return t, 1.0
+    best = ""
+    for st in range(len(t)):
+        m = _FIND.match(t, st)
+        if m and len(m.group(0)) > len(best):
+            best = m.group(0)
+    return (best, len(best) / len(t)) if best else (t, 1.0)
