@@ -8,7 +8,7 @@ if (-not (Test-Path $envFile)) {
   [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
   $key = [Convert]::ToBase64String($bytes).Replace("+","a").Replace("/","b").Replace("=","")
   Set-Content -Path $envFile -Value ("BACKEND_KEY=" + $key) -Encoding ascii
-  Write-Host "สร้างรหัสใหม่ไว้ใน .worker.env แล้ว (ห้ามส่งให้ใคร)"
+  Write-Host "Created a new key in .worker.env (keep it secret)"
 }
 Get-Content $envFile | ForEach-Object { if ($_ -match "^\s*([A-Z_]+)\s*=\s*(.*)$") { Set-Item -Path ("Env:" + $Matches[1]) -Value $Matches[2] } }
 $env:Path += ";C:\Program Files\Tesseract-OCR"
@@ -16,5 +16,5 @@ if (-not $env:AI_LOCAL) { $env:AI_LOCAL = "1" }
 if (-not $env:OCR_CONCURRENCY) { $env:OCR_CONCURRENCY = "1" }
 if (-not $env:TESS_LANG) { $env:TESS_LANG = "tha+eng" }
 $env:OMP_NUM_THREADS = "4"
-Write-Host "เริ่มที่ http://127.0.0.1:8000  (หยุด: กด Ctrl+C)"
+Write-Host "Starting at http://127.0.0.1:8000  (stop: Ctrl+C)"
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000

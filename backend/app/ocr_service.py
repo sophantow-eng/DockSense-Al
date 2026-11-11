@@ -22,6 +22,7 @@ def _get():
 
 def read(img) -> list[tuple[str, float]]:
     """คืน [(ข้อความ, ความมั่นใจ 0..1)] ของแต่ละส่วนที่เจอ"""
-    r = _get().readtext(img, detail=1, paragraph=False,
-                        allowlist="0123456789กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ กรุงเทพมหานครเชียงใหม่ภูเก็ตขอนแก่นนครราชสีมาชลบุรีสมุทรปราการนนทบุรีปทุมธานี")
+    # ไม่ใช้ allowlist: ทดสอบจริงบนแล็ปท็อปพบว่าใส่ allowlist แล้วโมเดลไทยทิ้งพยัญชนะ (ได้แต่ "1234") ·
+    # ตัวอักษรเกินจะถูก plate_utils.clean() กรองทีหลัง และข้อความดิบเดิมยังเก็บไว้ใน raw
+    r = _get().readtext(img, detail=1, paragraph=False)
     return [(t, float(c)) for _, t, c in r]
