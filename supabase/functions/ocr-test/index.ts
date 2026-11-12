@@ -1,6 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { encodeBase64 } from "jsr:@std/encoding@1/base64";
 
 // โหมดทดสอบ: ผู้ดูแลส่งภาพ 1 รูป → รัน Tesseract และ/หรือ AI "แยกกัน" แล้วคืนผลคู่กัน
 // ไม่เขียนประวัติ/ฐานข้อมูลใดๆ (ไม่มีการบันทึกรถ) · รหัส backend อยู่ฝั่งเซิร์ฟเวอร์ ไม่ส่งให้เบราว์เซอร์
@@ -8,6 +7,33 @@ const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
 type R = { state: string; plate?: string | null; confidence?: number | null; status?: string; ms?: number; provider?: string; error?: string; detail?: unknown };
+
+
+// ---- เทียบกับรถที่ลงทะเบียนไว้ (ข้อเสนอให้คนยืนยัน ไม่แก้ทะเบียนเอง) ----
+// ตัวเลขต้องตรงทุกตัว · พยัญชนะต่างได้เฉพาะกลุ่มที่หน้าตาคล้ายกัน (ข/ฆ/ช…) ไม่เกิน 2 ตำแหน่ง · ต้องเหลือรถคันเดียวเท่านั้น ไม่งั้นไม่เสนอ
+const SIM = ["ขฃฆชซ", "พผฝฟ", "ญณฌ", "ดตคศ", "บปษ", "กถภ", "ลฬ", "รธ", "ฆฝ", "สศ"]; // ฆ↔ฝ, ข↔ฆ พบจากภาพจริงของระบบนี้ · กลุ่มอื่นเป็นหน้าตาคล้าย (ต้องปรับจากข้อมูลจริง)
+const PAIR = new Set<string>(); SIM.forEach((g) => { for (const a of g) for (const b of g) if (a !== b) PAIR.add(a + b); });
+const keyOf = (t: string) => String(t || "").replace(/[^ก-ฮ0-9]/g, "");
+function matchKnown(cands: string[], known: { k: string; plate: string }[]) {
+  const found = new Map<string, { plate: string; exact: boolean }>();
+  for (const raw of cands) {
+    const c = keyOf(raw); if (c.length < 4) continue;
+    for (const v of known) {
+      if (v.k.length !== c.length) continue;
+      if (v.k === c) { found.set(v.k, { plate: v.plate, exact: true }); continue; }
+      let soft = 0, ok = true;
+      for (let i = 0; i < c.length && ok; i++) {
+        if (c[i] === v.k[i]) continue;
+        if (PAIR.has(c[i] + v.k[i])) soft++; else ok = false;
+      }
+      if (ok && soft >= 1 && soft <= 2 && !found.has(v.k)) found.set(v.k, { plate: v.plate, exact: false });
+    }
+  }
+  const all = [...found.values()], exact = all.filter((x) => x.exact);
+  if (exact.length === 1) return { plate: exact[0].plate, exact: true };
+  if (!exact.length && all.length === 1) return all[0];
+  return null;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -81,6 +107,17 @@ Deno.serve(async (req) => {
       const passed = results.tesseract.state === "DONE" && results.tesseract.status === "VERIFIED";
       results.ai = passed ? { state: "SKIPPED", error: "Tesseract ผ่านแล้ว ไม่ต้องใช้ AI" } : !ctl.auto_fallback ? { state: "SKIPPED", error: "Automatic Fallback ปิดอยู่" } : await runAi();
     }
+    // เทียบกับรถที่ลงทะเบียนไว้ (ข้อเสนอเท่านั้น)
+    try {
+      const { data: vs } = await sb.from("vehicles").select("plate_norm,license_plate").not("plate_norm", "is", null).limit(20000);
+      const known = (vs || []).map((v: { plate_norm: string; license_plate: string }) => ({ k: keyOf(v.plate_norm), plate: v.license_plate || v.plate_norm }));
+      for (const r of Object.values(results)) {
+        if (!r || r.state === "SKIPPED") continue;
+        const raws = ((r.detail as { raw?: string[] } | undefined)?.raw || []) as string[];
+        const m = known.length ? matchKnown([r.plate || "", ...raws], known) : null;
+        if (m) (r as R & { suggestion?: unknown }).suggestion = m;
+      }
+    } catch (_e) { /* ไม่มีข้อเสนอ ไม่กระทบผลอ่าน */ }
     const a = results.tesseract?.plate, b = results.ai?.plate;
     return json({ test: true, mode, results, match: a && b ? String(a).replace(/[\s-]/g, "") === String(b).replace(/[\s-]/g, "") : null });
   } catch (e) {
