@@ -13,6 +13,33 @@ const lastWrite = new Map<string, number>(), frameN = new Map<string, number>(),
 // deno-lint-ignore no-explicit-any
 const bg = (p: Promise<any>) => { const er = (globalThis as any).EdgeRuntime; if (er?.waitUntil) { er.waitUntil(p); return Promise.resolve(); } return p; };
 
+
+// ---- เทียบกับรถที่ลงทะเบียนไว้ (ข้อเสนอให้คนยืนยัน ไม่แก้ทะเบียนเอง) ----
+// ตัวเลขต้องตรงทุกตัว · พยัญชนะต่างได้เฉพาะกลุ่มที่หน้าตาคล้ายกัน ไม่เกิน 2 ตำแหน่ง · ต้องเหลือรถคันเดียวเท่านั้น ไม่งั้นไม่เสนอ
+const SIM = ["ขฃฆชซ", "พผฝฟ", "ญณฌ", "ดตคศ", "บปษ", "กถภ", "ลฬ", "รธ", "ฆฝ", "สศ"];
+const PAIR = new Set<string>(); SIM.forEach((g) => { for (const a of g) for (const b of g) if (a !== b) PAIR.add(a + b); });
+const keyOf = (t: string) => String(t || "").replace(/[^ก-ฮ0-9]/g, "");
+function matchKnown(cands: string[], known: { k: string; plate: string }[]) {
+  const found = new Map<string, { plate: string; exact: boolean }>();
+  for (const raw of cands) {
+    const c = keyOf(raw); if (c.length < 4) continue;
+    for (const v of known) {
+      if (v.k.length !== c.length) continue;
+      if (v.k === c) { found.set(v.k, { plate: v.plate, exact: true }); continue; }
+      let soft = 0, ok = true;
+      for (let i = 0; i < c.length && ok; i++) {
+        if (c[i] === v.k[i]) continue;
+        if (PAIR.has(c[i] + v.k[i])) soft++; else ok = false;
+      }
+      if (ok && soft >= 1 && soft <= 2 && !found.has(v.k)) found.set(v.k, { plate: v.plate, exact: false });
+    }
+  }
+  const all = [...found.values()], exact = all.filter((x) => x.exact);
+  if (exact.length === 1) return { plate: exact[0].plate, exact: true };
+  if (!exact.length && all.length === 1) return all[0];
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -110,6 +137,7 @@ Deno.serve(async (req) => {
     let ocr: any = {}; let ocrOk = false; let viaBackend = false; let ocrRes = { ok: false } as Response;
     // deno-lint-ignore no-explicit-any
     let weak: any = null;
+    let candRaw: string[] = [];
     const bUrl = (Deno.env.get("OCR_BACKEND_URL") || "").replace(/\/$/, ""), bKey = Deno.env.get("OCR_BACKEND_KEY") || "";
     // เครื่องยนต์ที่อนุญาตให้ backend ใช้ตามสวิตช์: tesseract / ai (AI ฝั่ง backend = EasyOCR บนคอมเครื่องแรง ถ้าตั้งไว้ · ไม่มี = backend ตอบ NOT_CONFIGURED ไม่แกล้งอ่านได้)
     const bEngines = [ctl.tesseract ? "tesseract" : "", ctl.ai ? "ai" : ""].filter(Boolean).join(",");
@@ -119,6 +147,8 @@ Deno.serve(async (req) => {
         const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg", "x-ocr-engines": bEngines, "x-ocr-fallback": ctl.auto_fallback ? "1" : "0" }, body: bytes, signal: AbortSignal.timeout(ctl.ai ? 15000 : 8000) });
         if (br.ok) {
           const b = await br.json();
+          // deno-lint-ignore no-explicit-any
+          candRaw = [...(Array.isArray(b.raw) ? b.raw : []), ...Object.values(b.engines || {}).flatMap((e: any) => (Array.isArray(e?.raw) ? e.raw : []))].map(String);
           // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
           if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
             ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? "easyocr" : "tesseract", known: b.known_vehicle === true, color: b.vehicle_color ?? null };
@@ -190,8 +220,16 @@ Deno.serve(async (req) => {
       const since = new Date(Date.now() - 10 * 60_000).toISOString();
       const { data: dup } = await sb.from("vehicle_logs").select("id").eq("plate_norm", norm).gt("capture_at", since).limit(1);
       if (dup?.length) { await drop(); return json({ ok: true, duplicate: true, plate: ocr.plate }); }
+      // ข้อเสนอ: รถที่ลงทะเบียนไว้ที่ใกล้เคียงผลอ่าน (ไม่แก้ทะเบียนเอง · คนต้องกดยืนยันในหน้ารายละเอียด)
+      let sugNote = "";
+      try {
+        const { data: vs } = await sb.from("vehicles").select("plate_norm,license_plate").not("plate_norm", "is", null).limit(20000);
+        const known = (vs || []).map((v: { plate_norm: string; license_plate: string }) => ({ k: keyOf(v.plate_norm), plate: v.license_plate || v.plate_norm }));
+        const sg = known.length ? matchKnown([String(ocr.plate), ...candRaw], known) : null;
+        if (sg && keyOf(sg.plate) !== keyOf(String(ocr.plate))) sugNote = ` · ใกล้เคียงรถที่ลงไว้: ${sg.plate}`;
+      } catch (_e) { /* ไม่มีข้อเสนอ ไม่กระทบการบันทึก */ }
       const { data: ins, error } = await sb.from("vehicle_logs").insert({
-        plate_number: ocr.plate, province: ocr.province, vehicle_type: ocr.vehicle_type, note: `กล้อง: ${dev.name}`,
+        plate_number: ocr.plate, province: ocr.province, vehicle_type: ocr.vehicle_type, note: `กล้อง: ${dev.name}${sugNote}`,
         image_path: path, ocr_confidence: conf, ocr_provider: ocr.provider ?? null, status: "needs_review", source: isPhone ? "phone" : "esp32",
       }).select("id").single();
       if (error) { await drop(); return json({ error: error.message }, 500); }

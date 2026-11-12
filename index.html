@@ -853,6 +853,7 @@ function itemHtml(l) {
   return `<div class="item" data-id="${l.id}" style="padding:12px 0;border-top:1px solid var(--line);align-items:flex-start">${DS.thumb(l.image_path)}
   <div style="flex:1;min-width:0"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="plate wrapsafe">${esc(l.plate_number)}</span>${stBadge(l.status)}</div>
   <div class="muted wrapsafe">${esc(l.province || "-")} · ${esc(l.vehicle_type || "ไม่ระบุประเภท")}${colorTag(l) ? " · " + colorTag(l) : ""}</div>${co}
+  ${l.status === "needs_review" && sugOf(l) ? `<div class="badge warn" style="margin-top:4px;white-space:normal">น่าจะเป็น ${esc(sugOf(l))}</div>` : ""}
   <div class="muted">${DS.fmt.ago(l.capture_at)} · ${DS.fmt.date(l.capture_at)} ${DS.fmt.time(l.capture_at)}</div></div></div>`;
 }
 function bindItems(root, list) { DS.hydrateImages(root); root.querySelectorAll(".item[data-id]").forEach((el) => (el.onclick = () => showDetail(list.find((x) => x.id === el.dataset.id)))); }
@@ -907,6 +908,7 @@ async function openByPlate(n) {
 }
 
 /* ---------- รายละเอียดการเข้า / แก้ไข / ลบ ---------- */
+const sugOf = (l) => { const m = /ใกล้เคียงรถที่ลงไว้:\s*(.+)$/.exec(String((l && l.note) || "")); return m ? m[1].trim() : ""; };
 async function showDetail(log, norm) {
   const m = DS.modal("รายละเอียดทะเบียน", spin), body = m.querySelector(".sb"), n = log ? log.plate_norm : norm;
   const { data: hist, error } = await db.from("visit_details").select("*").eq("plate_norm", n).order("capture_at", { ascending: false }).limit(200);
@@ -919,10 +921,17 @@ async function showDetail(log, norm) {
   ${img ? `<div style="margin:12px 0">${img}</div>` : ""}
   ${log ? `<div class="grid g2"><div><label>วันและเวลาที่ตรวจพบ</label>${DS.fmt.dateTime(log.capture_at)}</div><div><label>จังหวัด</label>${esc(log.province || "-")}</div><div><label>ประเภทรถ</label>${esc(log.vehicle_type || "-")}</div><div><label>สีรถ</label>${colorTag(log) || "-"}</div><div><label>หมายเหตุ</label>${esc(log.note || "-")}</div></div>` : ""}
   <div class="card" style="margin:12px 0"><b>ตรวจพบทั้งหมด ${hist.length} ครั้ง</b> · ล่าสุด ${DS.fmt.dateTime(hist[0].capture_at)}</div>
+  ${log && w && log.status === "needs_review" && sugOf(log) ? `<div class="card" style="margin:12px 0"><div class="muted">ผลอ่านใกล้เคียงรถที่ลงทะเบียนไว้ — ตรวจเทียบกับภาพก่อนกดยืนยัน</div><div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px"><span class="plate wrapsafe" style="flex:none">${esc(sugOf(log))}</span><button id="dSug" style="flex:none">ใช้ทะเบียนนี้</button></div></div>` : ""}
   ${log ? `<div class="row" style="margin:0 0 12px;flex-wrap:wrap">${log.vehicle_id ? '<button class="ghost" id="dVeh">ดูรถคันนี้</button>' : w ? '<button id="dLink">ผูกกับรถ</button>' : ""}</div>` : ""}
   <b>ประวัติการตรวจพบ</b><div style="margin-top:6px">${hist.map((h) => `<div class="item" style="padding:6px 0;border-top:1px solid var(--line);cursor:default">${DS.thumb(h.image_path)}<div style="flex:1;min-width:0">${DS.fmt.dateTime(h.capture_at)}<div class="muted wrapsafe">${esc(h.note || "")}</div></div>${stBadge(h.status)}</div>`).join("")}</div>
   ${log ? `<div class="row" style="margin-top:14px">${w ? '<button class="ghost" id="dEdit">แก้ไข</button>' : ""}${DS.can(me, "delete") ? '<button class="danger" id="dDel">ลบ</button>' : ""}</div>` : ""}`;
   DS.hydrateImages(body);
+  if ($("#dSug")) $("#dSug").onclick = async (ev) => {
+    ev.target.disabled = true; const plate = sugOf(log), note = String(log.note || "").replace(/\s*·\s*ใกล้เคียงรถที่ลงไว้:.*$/, "");
+    const { error } = await db.from("vehicle_logs").update({ plate_number: plate, note }).eq("id", log.id);
+    if (error) { ev.target.disabled = false; return DS.toast(error.message, "error"); }
+    DS.toast("แก้ทะเบียนเป็น " + plate + " แล้ว", "ok"); m.remove(); reload();
+  };
   if ($("#dVeh")) $("#dVeh").onclick = () => { m.remove(); openVehicle(log.vehicle_id); };
   if ($("#dLink")) $("#dLink").onclick = () => { m.remove(); relinkFlow(log); };
   if ($("#dEdit")) $("#dEdit").onclick = () => { m.remove(); editLog(log); };
