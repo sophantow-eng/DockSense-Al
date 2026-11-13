@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     }
 
     const mode = String(body.mode || "compare");
-    if (!["tesseract", "ai", "compare", "fallback"].includes(mode)) return json({ error: "mode ไม่ถูกต้อง" }, 400);
+    if (!["tesseract", "easyocr", "gemini", "ai", "compare", "fallback"].includes(mode)) return json({ error: "mode ไม่ถูกต้อง" }, 400);
     const b64 = String(body.imageBase64 || "");
     if (!b64 || b64.length > 6_000_000) return json({ error: "ต้องมีภาพ (ไม่เกิน ~4 MB)" }, 400);
     const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
@@ -87,6 +87,18 @@ Deno.serve(async (req) => {
         return { state: x.found ? "DONE" : "NO_PLATE", plate: x.plate ?? null, confidence: x.confidence ?? null, status: x.status, ms: x.ms ?? Date.now() - t0, provider: "tesseract", detail: x };
       } catch (e) { return { state: "OFFLINE", error: (e as Error).message, ms: Date.now() - t0 }; }
     };
+    const runEasy = async (): Promise<R> => {
+      if (!ctl.ai) return { state: "OFF" };
+      if (!bUrl || !bKey) return { state: "NOT_CONFIGURED", error: "ยังไม่ได้ตั้ง OCR_BACKEND_URL / OCR_BACKEND_KEY" };
+      const t0 = Date.now();
+      try {
+        const r = await fetch(`${bUrl}/api/v1/ocr/test?mode=ai`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg" }, body: bin, signal: AbortSignal.timeout(60000) });
+        if (!r.ok) return { state: r.status === 429 ? "BUSY" : "ERROR", error: `backend ${r.status}`, ms: Date.now() - t0 };
+        const j = await r.json(), x = j.results?.ai || {};
+        if (["UNAVAILABLE", "ERROR", "NOT_CONFIGURED"].includes(x.status)) return { state: x.status, error: x.error || "เชื่อมคอมเครื่องแรงไม่ได้ (เช็ก AI_WORKER_URL ใน Render / เปิด worker + cloudflared)", ms: x.ms ?? Date.now() - t0 };
+        return { state: x.found ? "DONE" : "NO_PLATE", plate: x.plate ?? null, confidence: x.confidence ?? null, status: x.status, ms: x.ms ?? Date.now() - t0, provider: "easyocr", detail: x };
+      } catch (e) { return { state: "OFFLINE", error: (e as Error).message, ms: Date.now() - t0 }; }
+    };
     const runAi = async (): Promise<R> => {
       if (!ctl.ai) return { state: "OFF" };
       const t0 = Date.now();
@@ -100,12 +112,13 @@ Deno.serve(async (req) => {
 
     const results: Record<string, R> = {};
     if (mode === "tesseract") results.tesseract = await runTess();
-    else if (mode === "ai") results.ai = await runAi();
-    else if (mode === "compare") { const [t, a] = await Promise.all([runTess(), runAi()]); results.tesseract = t; results.ai = a; }
+    else if (mode === "easyocr") results.easyocr = await runEasy();
+    else if (mode === "gemini" || mode === "ai") results.gemini = await runAi();
+    else if (mode === "compare") { const [t, e, g] = await Promise.all([runTess(), runEasy(), runAi()]); results.tesseract = t; results.easyocr = e; results.gemini = g; }
     else { // fallback: จำลองสายผลิตจริง Tesseract → AI เมื่อไม่ผ่านและเปิด fallback
       results.tesseract = await runTess();
       const passed = results.tesseract.state === "DONE" && results.tesseract.status === "VERIFIED";
-      results.ai = passed ? { state: "SKIPPED", error: "Tesseract ผ่านแล้ว ไม่ต้องใช้ AI" } : !ctl.auto_fallback ? { state: "SKIPPED", error: "Automatic Fallback ปิดอยู่" } : await runAi();
+      results.gemini = passed ? { state: "SKIPPED", error: "Tesseract ผ่านแล้ว ไม่ต้องใช้ AI" } : !ctl.auto_fallback ? { state: "SKIPPED", error: "Automatic Fallback ปิดอยู่" } : await runAi();
     }
     // เทียบกับรถที่ลงทะเบียนไว้ (ข้อเสนอเท่านั้น)
     try {
@@ -118,8 +131,8 @@ Deno.serve(async (req) => {
         if (m) (r as R & { suggestion?: unknown }).suggestion = m;
       }
     } catch (_e) { /* ไม่มีข้อเสนอ ไม่กระทบผลอ่าน */ }
-    const a = results.tesseract?.plate, b = results.ai?.plate;
-    return json({ test: true, mode, results, match: a && b ? String(a).replace(/[\s-]/g, "") === String(b).replace(/[\s-]/g, "") : null });
+    const ps = Object.values(results).map((r) => r?.plate).filter(Boolean).map((x) => String(x).replace(/[\s-]/g, ""));
+    return json({ test: true, mode, results, match: ps.length >= 2 ? ps.every((x) => x === ps[0]) : null });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
