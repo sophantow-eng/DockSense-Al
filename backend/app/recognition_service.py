@@ -145,24 +145,36 @@ def run_engine(name: str, images: list[bytes]) -> dict:
     out["rss_mb"] = rss_mb()
     return out
 
+def _norm(r):
+    return (r.get("plate_norm") or r.get("plate") or "").replace(" ", "").replace("-", "")
+
 def _final(results: dict) -> dict:
-    """ตัดสินสุดท้ายจากผลแยกตามเครื่องยนต์ — ห้ามให้ผลที่ไม่ผ่านถูกยกเป็น VERIFIED"""
+    """ตัดสินสุดท้ายจากผลแยกตามเครื่องยนต์ — ห้ามให้ผลที่ไม่ผ่านถูกยกเป็น VERIFIED
+    สองเครื่องอ่านตรงกัน = เชื่อถือขึ้น · อ่านไม่ตรงกัน = ส่งให้คนตรวจเสมอ (แม้เครื่องหนึ่งจะมั่นใจ) · AI ตอบแล้วแต่ไม่เห็นป้าย = ไม่ให้ Tesseract ผ่านเดี่ยว"""
     t, a = results.get("tesseract"), results.get("ai")
     ok = lambda r: r and r.get("status") == "VERIFIED"
+    alive = lambda r: r and r.get("status") not in ("ERROR", "UNAVAILABLE", "NOT_CONFIGURED")
+    found = [r for r in (t, a) if r and r.get("plate")]
+    if not found:
+        return {"found": False, "status": "FAILED", "plate": None, "confidence": 0.0, "needs_review": False, "decided_by": None}
+    plates = {_norm(r) for r in found}
+    if len(found) == 2 and len(plates) == 1:  # ตรงกัน
+        best = max(found, key=lambda r: r.get("confidence", 0))
+        passed = ok(t) or ok(a)
+        st = "VERIFIED" if passed else "NEEDS_REVIEW"
+        return {**best, "status": st, "needs_review": st != "VERIFIED", "decided_by": best.get("engine"), "agree": True}
+    if len(plates) > 1:  # ไม่ตรงกัน
+        best = max(found, key=lambda r: r.get("confidence", 0))
+        return {**best, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": best.get("engine"), "conflict": sorted(p for p in plates if p)}
+    if ok(t) and a is not None and alive(a) and not a.get("plate"):  # AI ตอบแล้วแต่ไม่เห็นป้ายเลย
+        return {**t, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": "tesseract", "ai_no_confirm": True}
     if ok(t):
         return {**t, "decided_by": "tesseract"}
     if ok(a):
         return {**a, "decided_by": "ai"}
-    found = [r for r in (t, a) if r and r.get("plate")]
-    if not found:
-        return {"found": False, "status": "FAILED", "plate": None, "confidence": 0.0, "needs_review": False, "decided_by": None}
-    best = max(found, key=lambda r: r.get("confidence", 0))
-    plates = {r.get("plate_norm") or r.get("plate") for r in found}
+    best = found[0]
     status = "NEEDS_REVIEW" if best.get("status") in ("VERIFIED", "NEEDS_REVIEW") else best.get("status", "NEEDS_REVIEW")
-    out = {**best, "status": status, "needs_review": status == "NEEDS_REVIEW", "decided_by": best.get("engine")}
-    if len(plates) > 1:
-        out.update(status="NEEDS_REVIEW", needs_review=True, conflict=sorted(p for p in plates if p))
-    return out
+    return {**best, "status": status, "needs_review": status == "NEEDS_REVIEW", "decided_by": best.get("engine")}
 
 def _color(images) -> dict:
     """สีตัวรถโดยประมาณ (ค่าประมาณจากพื้นที่รอบป้าย ไม่ใช่ค่าแน่นอน) · ไม่ชัด/ผิดพลาด = None ไม่ทำให้การอ่านทะเบียนล้ม"""
@@ -180,21 +192,32 @@ def _color(images) -> dict:
         return {"vehicle_color": None, "color_confidence": None}
 
 def process(images: list[bytes], engines=("tesseract",), fallback: bool = True) -> dict:
-    """ผลิตจริง: Tesseract ก่อน → (ผ่าน = จบ ไม่เรียก AI) → ไม่ผ่าน + เปิด fallback + AI พร้อม → AI
-    engines คือสวิตช์ที่ "อนุญาต" ให้ใช้ · ปิดทั้งคู่ = ไม่ประมวลผล (ผู้เรียกต้องตอบ recognition_disabled)"""
+    """ผลิตจริง: ถ้าอนุญาตทั้งสองเครื่องและ AI (EasyOCR บนคอมแรง) พร้อม → อ่านพร้อมกัน แล้วเทียบกัน (เร็วกว่าอ่านต่อคิว + แม่นกว่าเพราะมีเครื่องที่สองยืนยัน)
+    AI ไม่พร้อม/ล้มเหลว = ใช้ Tesseract ตามเดิม · เปิดแค่ตัวเดียว = ตัวนั้น · ปิดทั้งคู่ = ไม่ประมวลผล (ผู้เรียกต้องตอบ recognition_disabled)"""
     t0 = time.time()
     engines = set(engines)
     results = {}
-    if "tesseract" in engines:
-        results["tesseract"] = run_engine("tesseract", images)
-    t = results.get("tesseract")
-    need_ai = "ai" in engines and (t is None or (fallback and t.get("status") != "VERIFIED"))
-    if need_ai:
-        results["ai"] = run_engine("ai", images)
+    if "tesseract" in engines and "ai" in engines and fallback and ai_engine.ready():
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            ft = ex.submit(run_engine, "tesseract", images)
+            fa = ex.submit(run_engine, "ai", images)
+            results["tesseract"], results["ai"] = ft.result(), fa.result()
+    else:
+        if "tesseract" in engines:
+            results["tesseract"] = run_engine("tesseract", images)
+        t = results.get("tesseract")
+        if "ai" in engines and (t is None or (fallback and t.get("status") != "VERIFIED")):
+            results["ai"] = run_engine("ai", images)
     final = _final(results)
     final["engines"] = results
     final["engines_used"] = [k for k, v in results.items() if v.get("status") not in ("UNAVAILABLE", "NOT_CONFIGURED")]
     final["ms"] = int((time.time() - t0) * 1000)
     final["quality_note"] = None
+    w = []
+    if final.get("conflict"): w.append("engines_disagree")
+    if final.get("agree"): w.append("engines_agree")
+    if final.get("ai_no_confirm"): w.append("ai_no_confirm")
+    final["warnings"] = w
     final.update(_color(images))
     return final
