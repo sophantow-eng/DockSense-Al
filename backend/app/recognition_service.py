@@ -1,22 +1,54 @@
 """ไหลงาน: ตรวจคุณภาพ → หาป้าย → ปรับภาพ → OCR → ทำความสะอาด → ตรวจรูปแบบ → โหวตหลายเฟรม → ตัดสินใจ"""
+import re
 import time
 from collections import defaultdict
 import os
 from . import config, image_utils as iu, plate_utils as pu, ocr_service, known_plates, tesseract_engine, ai_engine
 
 def _combine(parts):
-    """ข้อความหลายส่วนในป้ายเดียว (บรรทัดบน เลข/อักษร + บรรทัดล่าง จังหวัด): เอาส่วนที่ clean แล้วเป็นรูปทะเบียน"""
+    """ข้อความหลายส่วนในป้ายเดียว (บรรทัดบน เลข/อักษร + บรรทัดล่าง จังหวัด): หาส่วนที่ต่อกันตามลำดับ (ข้ามส่วนจังหวัดได้) แล้วเป็นรูปทะเบียนยาวที่สุด
+    (ข้อมูลจริง: ข้อความจังหวัดปนมาทำให้ต่อทั้งหมดแล้วไม่ใช่รูปทะเบียน จึงเคยเหลือแต่ท่อนเดียว เช่น '3กล' กับ '7029' แยกกัน)"""
     texts = [(pu.clean(t), c) for t, c in parts if pu.clean(t)]
     if not texts:
         return "", 0.0
-    joined = "".join(t for t, _ in texts)
-    cs = [c for _, c in texts]
-    if pu.is_standard(joined):
-        return joined, sum(cs) / len(cs)
-    best = max(texts, key=lambda x: (pu.is_standard(x[0]), x[1]))
-    if not pu.is_standard(best[0]):   # ไม่ใช่รูปทะเบียนเต็ม (ได้แต่เลข/อักษรเดี่ยว) ห้ามมีความมั่นใจสูง
-        return best[0], min(best[1], 0.4)
-    return best
+    from itertools import combinations
+    texts = texts[:7]
+    best_win = None
+    for n in range(1, len(texts) + 1):
+        for idx in combinations(range(len(texts)), n):   # คงลำดับเดิม ข้ามส่วนที่เป็นข้อความจังหวัดได้
+            joined = "".join(texts[k][0] for k in idx)
+            if pu.is_standard(joined):
+                cs = [texts[k][1] for k in idx]
+                cand = (len(joined), sum(cs) / len(cs), joined)
+                if best_win is None or cand[:2] > best_win[:2]:
+                    best_win = cand
+    if best_win:
+        return best_win[2], best_win[1]
+    best = max(texts, key=lambda x: x[1])
+    return best[0], min(best[1], 0.4)   # ไม่ใช่รูปทะเบียนเต็ม (ได้แต่เลข/อักษรเดี่ยว) ห้ามมีความมั่นใจสูง
+
+_PRE = re.compile(rf"^[0-9]?[{pu.THAI_CONS}]{{1,2}}$")
+_DIG = re.compile(r"^[0-9]{3,4}$")
+
+def _merge_halves(cands: list[dict]) -> dict | None:
+    """ข้อมูลจริง (3กล7029, 6ขห4243): แต่ละแบบภาพเห็นแค่ครึ่งเดียว (อักษรนำ หรือ เลขท้าย) ไม่มีแบบไหนเห็นครบ
+    ถ้าไม่มีผลที่เป็นรูปทะเบียนเต็มเลย → ต่อ 'อักษรนำที่เห็นซ้ำมากสุด' + 'เลขท้ายที่เห็นซ้ำมากสุด' (ไม่แก้ตัวอักษรใด)
+    ผลที่ต่อเองจำกัดความมั่นใจ ≤ 0.6 เพื่อไม่ผ่านอัตโนมัติ — ต้องมีคนยืนยัน"""
+    if any(c["std"] for c in cands):
+        return None
+    def top(rx):
+        grp = {}
+        for c in cands:
+            if rx.match(c["text"]):
+                g = grp.setdefault(c["text"], [0, 0.0]); g[0] += 1; g[1] = max(g[1], c["conf"])
+        return max(grp.items(), key=lambda kv: (kv[1][0], kv[1][1]), default=None)
+    a, b = top(_PRE), top(_DIG)
+    if not a or not b:
+        return None
+    joined = a[0] + b[0]
+    if not pu.is_standard(joined):
+        return None
+    return {"variant": "merge", "text": joined, "conf": round(min(0.6, a[1][1], b[1][1]), 3), "std": True, "merged": True}
 
 def read_frame(img, reader=None, variant_names=None) -> dict:
     reader = reader or ocr_service.read
@@ -41,10 +73,14 @@ def read_frame(img, reader=None, variant_names=None) -> dict:
     cands = []
     known = known_plates.get()
     done = False
-    for bx, target in targets:
+    if not slow:
+        targets.append((None, img))   # สำรองสุดท้าย: ทั้งภาพ (เมื่อตัดส่วนป้ายแล้วอักษรหาย)
+    for ti, (bx, target) in enumerate(targets):
         for name, v in iu.variants(target).items():
             if variant_names and name not in variant_names:
                 continue
+            if ti > 0 and not slow and name not in ("orig", "clahe"):
+                continue   # เป้าหมายสำรองใช้แค่ 2 แบบภาพ (คุมเวลา)
             text, conf = _combine(reader(v))
             if text:
                 cands.append({"variant": name, "text": text, "conf": conf, "std": pu.is_standard(text)})
@@ -52,10 +88,17 @@ def read_frame(img, reader=None, variant_names=None) -> dict:
                     done = True; break
                 if slow and pu.is_standard(text):
                     done = True; break
-        if done or (not slow and cands):
+        if done or (not slow and any(c["std"] for c in cands)):
             break
+    mg = _merge_halves(cands)
+    if mg:
+        cands.append(mg)
     box = targets[0][0]
-    best = max(cands, key=lambda c: (c["std"], c["conf"]), default=None)
+    # เลือกผลต่อเฟรม: ข้อความเดียวกันที่หลายแบบภาพอ่านตรงกัน (ผลรวมความมั่นใจ) ชนะผลเดี่ยวที่มั่นใจสูงแต่ขาดตัว
+    agg, cnt = defaultdict(float), defaultdict(int)
+    for c in cands: agg[c["text"]] += c["conf"]; cnt[c["text"]] += 1
+    # จำนวนแบบภาพที่เห็นตรงกันมาก่อน (ข้อมูลจริง: 'ขว1053' เห็น 2 แบบ ชนะ 'ข1053' ที่เห็นแบบเดียวแต่มั่นใจสูงซึ่งตกอักษรไป 1 ตัว)
+    best = max(cands, key=lambda c: (c["std"], cnt[c["text"]], agg[c["text"]], c["conf"]), default=None)
     return {"fp": iu.fingerprint(img), "quality": q, "plate_box": box[:4] if box else None,
             "raw": [c["text"] for c in cands], "best": best, "ms": int((time.time() - t0) * 1000)}
 
