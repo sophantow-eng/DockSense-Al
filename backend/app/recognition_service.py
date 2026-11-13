@@ -168,6 +168,8 @@ def _final(results: dict) -> dict:
         return {**best, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": best.get("engine"), "conflict": sorted(p for p in plates if p)}
     if ok(t) and a is not None and alive(a) and not a.get("plate"):  # AI ตอบแล้วแต่ไม่เห็นป้ายเลย
         return {**t, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": "tesseract", "ai_no_confirm": True}
+    if ok(a) and t is not None and alive(t) and not t.get("plate"):  # Tesseract ตอบแล้วแต่ไม่เห็น = EasyOCR เดี่ยวไม่ผ่านอัตโนมัติ (ข้อมูลจริง: ผ่านเดี่ยวแล้วผิดได้)
+        return {**a, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": "ai", "tess_no_confirm": True}
     if ok(t):
         return {**t, "decided_by": "tesseract"}
     if ok(a):
@@ -218,6 +220,7 @@ def process(images: list[bytes], engines=("tesseract",), fallback: bool = True) 
     if final.get("conflict"): w.append("engines_disagree")
     if final.get("agree"): w.append("engines_agree")
     if final.get("ai_no_confirm"): w.append("ai_no_confirm")
+    if final.get("tess_no_confirm"): w.append("tess_no_confirm")
     final["warnings"] = w
     final.update(_color(images))
     return final

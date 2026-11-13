@@ -31,9 +31,9 @@ def read(path, eng, k):
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             j = json.loads(r.read())
-        return KEEP.sub("", j.get("plate") or ""), j.get("status"), float(j.get("confidence") or 0), int((time.time() - t0) * 1000)
+        return KEEP.sub("", j.get("plate") or ""), j.get("status"), float(j.get("confidence") or 0), int((time.time() - t0) * 1000), " | ".join(map(str, j.get("raw") or []))[:200]
     except Exception as e:  # noqa: BLE001
-        return "", "ERROR:" + type(e).__name__, 0.0, int((time.time() - t0) * 1000)
+        return "", "ERROR:" + type(e).__name__, 0.0, int((time.time() - t0) * 1000), ""
 
 def main():
     if len(sys.argv) < 2:
@@ -48,7 +48,7 @@ def main():
         if len(t) < 4:
             print("ข้าม (ชื่อไฟล์ไม่ใช่ทะเบียน):", fn); continue
         for e in ENGINES:
-            p, st, c, ms = read(os.path.join(folder, fn), e, k)
+            p, st, c, ms, raw = read(os.path.join(folder, fn), e, k)
             s = stats[e]; s["n"] += 1; s["ms"].append(ms)
             ok = p == t
             s["exact"] += ok
@@ -61,11 +61,12 @@ def main():
             if p and not ok and len(p) == len(t):
                 for a, b in zip(t, p):
                     if a != b: conf[(a, b)] += 1
-            rows.append([fn, t, e, p, "ถูก" if ok else "ผิด", st, f"{c:.2f}", ms])
+            rows.append([fn, t, e, p, "ถูก" if ok else "ผิด", st, f"{c:.2f}", ms, raw])
             print(f"{'✓' if ok else '✗'} {fn[:28]:28} จริง={t:10} {e:9} อ่านได้={p or '-':10} {st} {ms}ms")
+            if not ok: print(f"     ข้อความดิบที่ EasyOCR เห็น: {raw or '-'}")
     out = os.path.join(folder, "ผลทดสอบ.csv")
     with open(out, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f); w.writerow(["ไฟล์", "ทะเบียนจริง", "เครื่องยนต์", "อ่านได้", "ผล", "สถานะ", "ความมั่นใจ", "ms"]); w.writerows(rows)
+        w = csv.writer(f); w.writerow(["ไฟล์", "ทะเบียนจริง", "เครื่องยนต์", "อ่านได้", "ผล", "สถานะ", "ความมั่นใจ", "ms", "ข้อความดิบ"]); w.writerows(rows)
     print("\n===== สรุป (จำนวนภาพน้อย = ยังไม่ใช่ตัวเลขที่เชื่อถือได้) =====")
     for e, s in stats.items():
         n = s["n"] or 1
