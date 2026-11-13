@@ -138,6 +138,7 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     let weak: any = null;
     let candRaw: string[] = [];
+    let engNote = "";
     const bUrl = (Deno.env.get("OCR_BACKEND_URL") || "").replace(/\/$/, ""), bKey = Deno.env.get("OCR_BACKEND_KEY") || "";
     // เครื่องยนต์ที่อนุญาตให้ backend ใช้ตามสวิตช์: tesseract / ai (AI ฝั่ง backend = EasyOCR บนคอมเครื่องแรง ถ้าตั้งไว้ · ไม่มี = backend ตอบ NOT_CONFIGURED ไม่แกล้งอ่านได้)
     const bEngines = [ctl.tesseract ? "tesseract" : "", ctl.ai ? "ai" : ""].filter(Boolean).join(",");
@@ -149,6 +150,7 @@ Deno.serve(async (req) => {
           const b = await br.json();
           // deno-lint-ignore no-explicit-any
           candRaw = [...(Array.isArray(b.raw) ? b.raw : []), ...Object.values(b.engines || {}).flatMap((e: any) => (Array.isArray(e?.raw) ? e.raw : []))].map(String);
+          if (Array.isArray(b.warnings) && b.warnings.includes("engines_disagree")) engNote = " · สองเครื่องอ่านไม่ตรงกัน";
           // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
           if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
             ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? "easyocr" : "tesseract", known: b.known_vehicle === true, color: b.vehicle_color ?? null };
@@ -167,7 +169,7 @@ Deno.serve(async (req) => {
       ocr = await ocrRes.json().catch(() => ({}));
     } else if (!ocrOk) {
       ocrRes = { ok: true } as Response;
-      ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: "tesseract", color: weak.vehicle_color ?? null } : { found: false };
+      ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: weak.decided_by === "ai" ? "easyocr" : "tesseract", color: weak.vehicle_color ?? null } : { found: false };
     }
     if (!ocrRes.ok) {
       // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
@@ -229,7 +231,7 @@ Deno.serve(async (req) => {
         if (sg && keyOf(sg.plate) !== keyOf(String(ocr.plate))) sugNote = ` · ใกล้เคียงรถที่ลงไว้: ${sg.plate}`;
       } catch (_e) { /* ไม่มีข้อเสนอ ไม่กระทบการบันทึก */ }
       const { data: ins, error } = await sb.from("vehicle_logs").insert({
-        plate_number: ocr.plate, province: ocr.province, vehicle_type: ocr.vehicle_type, note: `กล้อง: ${dev.name}${sugNote}`,
+        plate_number: ocr.plate, province: ocr.province, vehicle_type: ocr.vehicle_type, note: `กล้อง: ${dev.name}${engNote}${sugNote}`,
         image_path: path, ocr_confidence: conf, ocr_provider: ocr.provider ?? null, status: "needs_review", source: isPhone ? "phone" : "esp32",
       }).select("id").single();
       if (error) { await drop(); return json({ error: error.message }, 500); }

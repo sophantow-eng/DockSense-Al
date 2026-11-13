@@ -853,6 +853,7 @@ function itemHtml(l) {
   return `<div class="item" data-id="${l.id}" style="padding:12px 0;border-top:1px solid var(--line);align-items:flex-start">${DS.thumb(l.image_path)}
   <div style="flex:1;min-width:0"><div class="row" style="justify-content:space-between;gap:6px;flex-wrap:wrap"><span class="plate wrapsafe">${esc(l.plate_number)}</span>${stBadge(l.status)}</div>
   <div class="muted wrapsafe">${esc(l.province || "-")} · ${esc(l.vehicle_type || "ไม่ระบุประเภท")}${colorTag(l) ? " · " + colorTag(l) : ""}</div>${co}
+  <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">${engBadge(l.ocr_provider)}${dupNote(l)}</div>
   ${l.status === "needs_review" && sugOf(l) ? `<div class="badge warn" style="margin-top:4px;white-space:normal">น่าจะเป็น ${esc(sugOf(l))}</div>` : ""}
   <div class="muted">${DS.fmt.ago(l.capture_at)} · ${DS.fmt.date(l.capture_at)} ${DS.fmt.time(l.capture_at)}</div></div></div>`;
 }
@@ -908,6 +909,9 @@ async function openByPlate(n) {
 }
 
 /* ---------- รายละเอียดการเข้า / แก้ไข / ลบ ---------- */
+const ENG = { easyocr: ["EasyOCR · คอมเครื่องแรง", "ok"], tesseract: ["Tesseract · เซิร์ฟเวอร์", ""], gemini: ["Gemini AI", ""] };
+const engBadge = (p, big) => ENG[p] ? `<span class="badge ${ENG[p][1]}" style="flex:none;${big ? "" : "font-size:11px;padding:2px 8px"}" title="โปรแกรมที่อ่านทะเบียนนี้">อ่านโดย ${ENG[p][0]}</span>` : "";
+const dupNote = (l) => (/สองเครื่องอ่านไม่ตรงกัน/.test(String((l && l.note) || "")) ? `<span class="badge warn" style="font-size:11px;padding:2px 8px;white-space:normal">สองเครื่องอ่านไม่ตรงกัน</span>` : "");
 const sugOf = (l) => { const m = /ใกล้เคียงรถที่ลงไว้:\s*(.+)$/.exec(String((l && l.note) || "")); return m ? m[1].trim() : ""; };
 async function showDetail(log, norm) {
   const m = DS.modal("รายละเอียดทะเบียน", spin), body = m.querySelector(".sb"), n = log ? log.plate_norm : norm;
@@ -921,6 +925,7 @@ async function showDetail(log, norm) {
   ${img ? `<div style="margin:12px 0">${img}</div>` : ""}
   ${log ? `<div class="grid g2"><div><label>วันและเวลาที่ตรวจพบ</label>${DS.fmt.dateTime(log.capture_at)}</div><div><label>จังหวัด</label>${esc(log.province || "-")}</div><div><label>ประเภทรถ</label>${esc(log.vehicle_type || "-")}</div><div><label>สีรถ</label>${colorTag(log) || "-"}</div><div><label>หมายเหตุ</label>${esc(log.note || "-")}</div></div>` : ""}
   <div class="card" style="margin:12px 0"><b>ตรวจพบทั้งหมด ${hist.length} ครั้ง</b> · ล่าสุด ${DS.fmt.dateTime(hist[0].capture_at)}</div>
+  ${log && log.ocr_provider ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin:8px 0">${engBadge(log.ocr_provider, true)}${dupNote(log)}</div>` : ""}
   ${log && w && log.status === "needs_review" && sugOf(log) ? `<div class="card" style="margin:12px 0"><div class="muted">ผลอ่านใกล้เคียงรถที่ลงทะเบียนไว้ — ตรวจเทียบกับภาพก่อนกดยืนยัน</div><div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px"><span class="plate wrapsafe" style="flex:none">${esc(sugOf(log))}</span><button id="dSug" style="flex:none">ใช้ทะเบียนนี้</button></div></div>` : ""}
   ${log ? `<div class="row" style="margin:0 0 12px;flex-wrap:wrap">${log.vehicle_id ? '<button class="ghost" id="dVeh">ดูรถคันนี้</button>' : w ? '<button id="dLink">ผูกกับรถ</button>' : ""}</div>` : ""}
   <b>ประวัติการตรวจพบ</b><div style="margin-top:6px">${hist.map((h) => `<div class="item" style="padding:6px 0;border-top:1px solid var(--line);cursor:default">${DS.thumb(h.image_path)}<div style="flex:1;min-width:0">${DS.fmt.dateTime(h.capture_at)}<div class="muted wrapsafe">${esc(h.note || "")}</div></div>${stBadge(h.status)}</div>`).join("")}</div>
