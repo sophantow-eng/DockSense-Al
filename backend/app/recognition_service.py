@@ -175,7 +175,10 @@ def run_engine(name: str, images: list[bytes]) -> dict:
             st = ai_engine.status()
             if st["state"] != "READY":
                 return {"engine": name, "status": "NOT_CONFIGURED", "error": st["note"], "ms": 0}
-            if st["kind"] == "worker":
+            if st["kind"] == "queue":
+                out = ai_engine.read_queue(images[0])
+                out["provider"] = "easyocr-queue"
+            elif st["kind"] == "worker":
                 out = ai_engine.read_remote(images[0])
                 out["provider"] = "ai-worker"
             else:

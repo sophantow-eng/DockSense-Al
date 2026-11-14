@@ -12,6 +12,12 @@ logging.basicConfig(level=logging.INFO, format='{"t":"%(asctime)s","lvl":"%(leve
 log = logging.getLogger("docksense")
 app = FastAPI(title="DockSense OCR Backend", version="2.0.0")
 
+@app.on_event("startup")
+def _start_queue():
+    from . import queue_client
+    # คอมแรง: ไปดึงงานจากคิวเอง (ผ่าน _guarded ใช้คิวความพร้อมกันเดียวกับ HTTP) · ไม่ตั้ง QUEUE_URL/QUEUE_KEY = ไม่ทำอะไร
+    queue_client.start(lambda jpeg: _guarded(recognition_service.process, [jpeg], ("ai",), False))
+
 _hits: dict[str, deque] = defaultdict(deque)
 _slots = threading.BoundedSemaphore(max(1, config.OCR_CONCURRENCY))   # จำกัดงาน OCR พร้อมกัน (คิวไม่สะสมไม่จำกัด)
 _stats = {"started": time.time(), "ok": 0, "busy": 0, "errors": 0}
