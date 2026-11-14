@@ -670,7 +670,7 @@ function occResultCard(title, r) {
   <div class="row sp"><span class="muted">ความมั่นใจ</span><span>${conf}</span></div>
   <div class="row sp"><span class="muted">เวลาอ่านจริง</span><span>${r.ms != null ? (r.ms / 1000).toFixed(2) + " วิ" : "-"}</span></div>
   <div class="row sp"><span class="muted">ผลตรวจ</span><span>${esc(r.status || "-")}</span></div>
-  <div class="row sp"><span class="muted">หน่วยความจำ</span><span>${r.detail && r.detail.rss_mb ? r.detail.rss_mb + " MB (เครื่อง backend)" : "ไม่มีข้อมูล"}</span></div>
+  ${r.detail && r.detail.rss_mb ? `<div class="row sp"><span class="muted">หน่วยความจำ</span><span>${r.detail.rss_mb} MB (เครื่อง backend)</span></div>` : ""}
   ${r.suggestion ? `<div class="badge ${r.suggestion.exact ? "ok" : "warn"}" style="display:block;margin-top:8px;white-space:normal">${r.suggestion.exact ? "ตรงกับรถที่ลงทะเบียนไว้" : "ใกล้เคียงรถที่ลงทะเบียนไว้ (ตรวจแล้วกดยืนยันเอง)"}: <b>${esc(r.suggestion.plate)}</b></div>` : ""}
   ${r.error ? `<p class="muted wrapsafe" style="margin:8px 0 0">${esc(r.error)}</p>` : ""}</div>`;
 }

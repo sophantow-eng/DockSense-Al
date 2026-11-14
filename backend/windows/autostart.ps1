@@ -51,8 +51,12 @@ switch ($Action) {
     $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($t) { Write-Host ("Auto-start at login: YES (" + $t.State + ")") } else { Write-Host "Auto-start at login: NO" }
     try {
-      $h = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v1/health" -TimeoutSec 5
+      $h = Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v1/health" -TimeoutSec 30
       Write-Host ("Worker is answering: ok=" + $h.ok + " ai=" + $h.ai)
-    } catch { Write-Host "Worker is not answering (not started yet, or still loading the model)" }
+    } catch {
+      $l = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+      if ($l) { Write-Host "Worker is RUNNING but busy or still loading (slow answer). Wait a minute and run status again." }
+      else { Write-Host "Worker is NOT running. Start it with: autostart.ps1 start (then check worker.log)" }
+    }
   }
 }
