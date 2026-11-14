@@ -162,18 +162,20 @@ def rss_mb() -> float | None:
     except Exception:
         return None
 
-def _with_yolo(e: dict, jpeg: bytes) -> dict:
+def _with_yolo(e: dict, jpeg: bytes, y: dict | None = None) -> dict:
     """คอมแรง: เอาผล EasyOCR มาเทียบกับ YOLO (อ่านตัวอักษรทีละตัว) · ตรงกัน+รูปแบบมาตรฐาน = ผ่าน · ไม่ตรง/YOLO อ่านเดี่ยว = ส่งตรวจเสมอ
     YOLO ใช้ไม่ได้ (ไม่ได้ลง/โหลดไม่ได้/ปิดไว้) = คืนผล EasyOCR เดิมทุกอย่าง"""
     if not yolo_engine.enabled():
         return e
-    try:
-        y = yolo_engine.read(jpeg)
-    except Exception as ex:  # noqa: BLE001
-        e["yolo"] = {"status": "ERROR", "error": f"{type(ex).__name__}: {str(ex)[:100]}"}
-        return e
-    e["yolo"] = {k: v for k, v in y.items() if k != "plate"}
-    e["yolo"]["plate"] = y.get("plate")
+    # ผลของ EasyOCR เดี่ยว ๆ (ก่อนรวมกับ YOLO) — ให้หน้าเว็บทดสอบแสดงแยกกันได้
+    e["easyocr"] = {"status": e.get("status"), "plate": e.get("plate"), "confidence": e.get("confidence"), "raw": list(e.get("raw") or [])[:8]}
+    if y is None:
+        try:
+            y = yolo_engine.read(jpeg)
+        except Exception as ex:  # noqa: BLE001
+            e["yolo"] = {"status": "ERROR", "error": f"{type(ex).__name__}: {str(ex)[:100]}"}
+            return e
+    e["yolo"] = dict(y)
     yp, ep = y.get("plate"), (e.get("plate_norm") or "")
     if not yp:
         return e
@@ -207,14 +209,21 @@ def run_engine(name: str, images: list[bytes]) -> dict:
                 return {"engine": name, "status": "NOT_CONFIGURED", "error": st["note"], "ms": 0}
             if st["kind"] == "queue":
                 out = ai_engine.read_queue(images[0])
-                out["provider"] = "easyocr-queue"
+                out["provider"] = out.get("provider") or "easyocr"   # คอมบอกเองว่า easyocr / yolo / yolo+easyocr
             elif st["kind"] == "worker":
                 out = ai_engine.read_remote(images[0])
                 out["provider"] = "ai-worker"
             else:
-                out = decide(_frames(images, ocr_service.read, None))
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=1) as ex:   # YOLO (~1 วิ) วิ่งคู่กับ EasyOCR (~7 วิ) ไม่ต่อคิวกัน
+                    fy = ex.submit(yolo_engine.read, images[0]) if yolo_engine.enabled() else None
+                    out = decide(_frames(images, ocr_service.read, None))
+                    try:
+                        y = fy.result() if fy else None
+                    except Exception as exn:  # noqa: BLE001
+                        y = {"status": "ERROR", "error": f"{type(exn).__name__}: {str(exn)[:100]}", "plate": None}
                 out["provider"] = "easyocr"
-                out = _with_yolo(out, images[0])
+                out = _with_yolo(out, images[0], y) if y is not None else out
         else:
             return {"engine": name, "status": "UNAVAILABLE", "error": "unknown engine", "ms": 0}
     except Exception as e:  # noqa: BLE001 — ล้มเหลว/หมดเวลา: รายงานตรง ๆ ไม่แต่งผล

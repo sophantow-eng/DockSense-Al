@@ -696,7 +696,7 @@ function occRender() {
   <p class="muted" style="margin:8px 0 0">สวิตช์ถูกบังคับที่เซิร์ฟเวอร์ (ฟังก์ชันรับภาพตรวจค่านี้ทุกครั้ง) ไม่ใช่แค่ปุ่มในหน้านี้</p></div>
   <div class="card"><h3>ทดสอบเทียบเครื่องยนต์</h3>
   <p class="muted" style="margin:0 0 8px">ผลทดสอบไม่ถูกบันทึกเป็นประวัติรถ · โหมด AI ใช้โควตาฟรีของ Gemini</p>
-  <select id="occTm" style="width:100%"><option value="tesseract">Tesseract อย่างเดียว (เซิร์ฟเวอร์)</option><option value="easyocr">EasyOCR อย่างเดียว (คอมเครื่องแรง)</option><option value="gemini">Gemini อย่างเดียว</option><option value="compare">เทียบทั้ง 3 ตัวพร้อมกัน</option><option value="fallback">ทดสอบสายจริง: Tesseract แล้วสลับไป AI</option></select>
+  <select id="occTm" style="width:100%"><option value="tesseract">Tesseract อย่างเดียว (เซิร์ฟเวอร์)</option><option value="easyocr">คอมเครื่องแรง: EasyOCR + YOLO ทำงานร่วมกัน (แสดงแยกทีละตัว)</option><option value="gemini">Gemini อย่างเดียว</option><option value="compare">เทียบทั้ง 3 ตัวพร้อมกัน</option><option value="fallback">ทดสอบสายจริง: Tesseract แล้วสลับไป AI</option></select>
   <div class="row" style="gap:8px;margin-top:8px"><button type="button" class="ghost" id="occPick" style="flex:1">🖼️ เลือกภาพ</button><button type="button" class="ghost" id="occCam" style="flex:1">📷 ถ่ายจากกล้อง</button></div>
   <input type="file" id="occFile" accept="image/*" class="hide">
   <div id="occPrev" style="margin-top:8px"></div>
@@ -733,7 +733,7 @@ function occRender() {
       const { data, error } = await db.functions.invoke("ocr-test", { body: { mode: $("#occTm").value, imageBase64: await b64(await shrinkJpeg(blob, 1280)) } });
       if (error) throw await DS.fnErr(error);
       const r = data.results || {}, m = data.mode;
-      $("#occOut").innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">${r.tesseract ? occResultCard("Tesseract · เซิร์ฟเวอร์", r.tesseract) : ""}${r.easyocr ? occResultCard("EasyOCR · คอมเครื่องแรง", r.easyocr) : ""}${r.gemini ? occResultCard("Gemini AI", r.gemini) : ""}</div>
+      $("#occOut").innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">${r.tesseract ? occResultCard("Tesseract · เซิร์ฟเวอร์", r.tesseract) : ""}${r.easyocr ? occResultCard("EasyOCR · คอมเครื่องแรง", r.easyocr) : ""}${r.yolo ? occResultCard("YOLO อ่านทีละตัวอักษร · คอมเครื่องแรง", r.yolo) : ""}${r.combined ? occResultCard("ผลรวม EasyOCR + YOLO (ที่ระบบใช้จริง)", r.combined) : ""}${r.gemini ? occResultCard("Gemini AI", r.gemini) : ""}</div>
       ${data.match === true ? '<p class="badge ok" style="display:block;margin:10px 0 0;white-space:normal">ทุกตัวที่อ่านได้ ทะเบียนตรงกัน</p>' : data.match === false ? '<p class="badge warn" style="display:block;margin:10px 0 0;white-space:normal">อ่านไม่ตรงกัน — ตรวจเทียบกับภาพจริงเอง</p>' : ""}
       <p class="muted" style="margin:8px 0 0">ผลนี้เป็นภาพเดียว ใช้เทียบกันคร่าวๆ ได้ แต่ยังบอกความแม่นยำรวมไม่ได้ ต้องทดสอบหลายภาพที่รู้ทะเบียนจริง</p>`;
     } catch (e) { $("#occOut").innerHTML = `<p class="muted wrapsafe">ทดสอบไม่สำเร็จ: ${esc(e.message)}</p>`; }
@@ -909,7 +909,7 @@ async function openByPlate(n) {
 }
 
 /* ---------- รายละเอียดการเข้า / แก้ไข / ลบ ---------- */
-const ENG = { easyocr: ["EasyOCR · คอมเครื่องแรง", "ok"], tesseract: ["Tesseract · เซิร์ฟเวอร์", ""], gemini: ["Gemini AI", ""] };
+const ENG = { "yolo+easyocr": ["YOLO + EasyOCR · คอมเครื่องแรง", "ok"], yolo: ["YOLO · คอมเครื่องแรง", "ok"], easyocr: ["EasyOCR · คอมเครื่องแรง", "ok"], tesseract: ["Tesseract · เซิร์ฟเวอร์", ""], gemini: ["Gemini AI", ""] };
 const engBadge = (p, big) => ENG[p] ? `<span class="badge ${ENG[p][1]}" style="flex:none;${big ? "" : "font-size:11px;padding:2px 8px"}" title="โปรแกรมที่อ่านทะเบียนนี้">อ่านโดย ${ENG[p][0]}</span>` : "";
 const dupNote = (l) => (/สองเครื่องอ่านไม่ตรงกัน/.test(String((l && l.note) || "")) ? `<span class="badge warn" style="font-size:11px;padding:2px 8px;white-space:normal">สองเครื่องอ่านไม่ตรงกัน</span>` : "");
 const sugOf = (l) => { const m = /ใกล้เคียงรถที่ลงไว้:\s*(.+)$/.exec(String((l && l.note) || "")); return m ? m[1].trim() : ""; };

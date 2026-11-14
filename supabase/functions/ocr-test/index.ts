@@ -87,17 +87,32 @@ Deno.serve(async (req) => {
         return { state: x.found ? "DONE" : "NO_PLATE", plate: x.plate ?? null, confidence: x.confidence ?? null, status: x.status, ms: x.ms ?? Date.now() - t0, provider: "tesseract", detail: x };
       } catch (e) { return { state: "OFFLINE", error: (e as Error).message, ms: Date.now() - t0 }; }
     };
-    const runEasy = async (): Promise<R> => {
-      if (!ctl.ai) return { state: "OFF" };
-      if (!bUrl || !bKey) return { state: "NOT_CONFIGURED", error: "ยังไม่ได้ตั้ง OCR_BACKEND_URL / OCR_BACKEND_KEY" };
+    // คอมเครื่องแรงมี 2 ตัวอ่านทำงานร่วมกัน: EasyOCR (อ่านเป็นข้อความ) + YOLO (อ่านตัวอักษรทีละตัว) → แยกแสดงทีละตัว + ผลรวมที่ตัดสินจริง
+    const runEasy = async (): Promise<Record<string, R>> => {
+      if (!ctl.ai) return { easyocr: { state: "OFF" } };
+      if (!bUrl || !bKey) return { easyocr: { state: "NOT_CONFIGURED", error: "ยังไม่ได้ตั้ง OCR_BACKEND_URL / OCR_BACKEND_KEY" } };
       const t0 = Date.now();
       try {
         const r = await fetch(`${bUrl}/api/v1/ocr/test?mode=ai`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg" }, body: bin, signal: AbortSignal.timeout(60000) });
-        if (!r.ok) return { state: r.status === 429 ? "BUSY" : "ERROR", error: `backend ${r.status}`, ms: Date.now() - t0 };
+        if (!r.ok) return { easyocr: { state: r.status === 429 ? "BUSY" : "ERROR", error: `backend ${r.status}`, ms: Date.now() - t0 } };
         const j = await r.json(), x = j.results?.ai || {};
-        if (["UNAVAILABLE", "ERROR", "NOT_CONFIGURED"].includes(x.status)) return { state: x.status, error: x.error || "เชื่อมคอมเครื่องแรงไม่ได้ (เช็ก AI_WORKER_URL ใน Render / เปิด worker + cloudflared)", ms: x.ms ?? Date.now() - t0 };
-        return { state: x.found ? "DONE" : "NO_PLATE", plate: x.plate ?? null, confidence: x.confidence ?? null, status: x.status, ms: x.ms ?? Date.now() - t0, provider: "easyocr", detail: x };
-      } catch (e) { return { state: "OFFLINE", error: (e as Error).message, ms: Date.now() - t0 }; }
+        if (["UNAVAILABLE", "ERROR", "NOT_CONFIGURED"].includes(x.status)) return { easyocr: { state: x.status, error: x.error || "เชื่อมคอมเครื่องแรงไม่ได้ (เปิดคอม/เช็กว่า worker ทำงานอยู่)", ms: x.ms ?? Date.now() - t0 } };
+        const ms = x.ms ?? Date.now() - t0;
+        const e = x.easyocr, y = x.yolo;
+        if (!e) { // worker ไม่มี YOLO (รุ่นเก่า/ปิดไว้) → ผลทั้งก้อนคือ EasyOCR
+          return { easyocr: { state: x.found ? "DONE" : "NO_PLATE", plate: x.plate ?? null, confidence: x.confidence ?? null, status: x.status, ms, provider: "easyocr", detail: x },
+                   yolo: { state: "NOT_CONFIGURED", error: y?.error ? `YOLO ใช้ไม่ได้: ${y.error}` : "worker ยังไม่ได้เปิด YOLO (ติดตั้ง/อัปเดตบนคอม)" } };
+        }
+        const out: Record<string, R> = {
+          easyocr: { state: e.plate ? "DONE" : "NO_PLATE", plate: e.plate ?? null, confidence: e.confidence ?? null, status: e.status, provider: "easyocr", detail: { raw: e.raw } },
+        };
+        const ys = String(y?.status || "");
+        out.yolo = ["UNAVAILABLE", "ERROR"].includes(ys) ? { state: ys, error: y?.error, ms: y?.ms }
+          : { state: y?.plate ? "DONE" : "NO_PLATE", plate: y?.plate ?? null, confidence: y?.mean_conf ?? null, status: y?.plate ? `ตัวที่มั่นใจน้อยสุด ${Math.round(Number(y.min_conf || 0) * 100)}%${y.province_code ? " · จังหวัด " + y.province_code : ""}` : undefined, ms: y?.ms, provider: "yolo" };
+        out.combined = { state: x.found ? "DONE" : "NO_PLATE", plate: x.plate ?? null, confidence: x.confidence ?? null, status: x.status, ms, provider: x.provider,
+          detail: { raw: x.raw, rss_mb: x.rss_mb }, error: x.internal_agree ? "สองตัวอ่านตรงกัน (ผ่านอัตโนมัติได้)" : Array.isArray(x.conflict) ? "สองตัวอ่านไม่ตรงกัน → ส่งคนตรวจ" : "มีตัวเดียวที่อ่านได้ → ส่งคนตรวจ" };
+        return out;
+      } catch (e) { return { easyocr: { state: "OFFLINE", error: (e as Error).message, ms: Date.now() - t0 } }; }
     };
     const runAi = async (): Promise<R> => {
       if (!ctl.ai) return { state: "OFF" };
@@ -112,9 +127,9 @@ Deno.serve(async (req) => {
 
     const results: Record<string, R> = {};
     if (mode === "tesseract") results.tesseract = await runTess();
-    else if (mode === "easyocr") results.easyocr = await runEasy();
+    else if (mode === "easyocr") Object.assign(results, await runEasy());
     else if (mode === "gemini" || mode === "ai") results.gemini = await runAi();
-    else if (mode === "compare") { const [t, e, g] = await Promise.all([runTess(), runEasy(), runAi()]); results.tesseract = t; results.easyocr = e; results.gemini = g; }
+    else if (mode === "compare") { const [t, e, g] = await Promise.all([runTess(), runEasy(), runAi()]); results.tesseract = t; Object.assign(results, e); results.gemini = g; }
     else { // fallback: จำลองสายผลิตจริง Tesseract → AI เมื่อไม่ผ่านและเปิด fallback
       results.tesseract = await runTess();
       const passed = results.tesseract.state === "DONE" && results.tesseract.status === "VERIFIED";
