@@ -3,7 +3,7 @@ import re
 import time
 from collections import defaultdict
 import os
-from . import config, image_utils as iu, plate_utils as pu, ocr_service, known_plates, tesseract_engine, ai_engine
+from . import config, image_utils as iu, plate_utils as pu, ocr_service, known_plates, tesseract_engine, ai_engine, yolo_engine
 
 def _combine(parts):
     """ข้อความหลายส่วนในป้ายเดียว (บรรทัดบน เลข/อักษร + บรรทัดล่าง จังหวัด): หาส่วนที่ต่อกันตามลำดับ (ข้ามส่วนจังหวัดได้) แล้วเป็นรูปทะเบียนยาวที่สุด
@@ -162,6 +162,36 @@ def rss_mb() -> float | None:
     except Exception:
         return None
 
+def _with_yolo(e: dict, jpeg: bytes) -> dict:
+    """คอมแรง: เอาผล EasyOCR มาเทียบกับ YOLO (อ่านตัวอักษรทีละตัว) · ตรงกัน+รูปแบบมาตรฐาน = ผ่าน · ไม่ตรง/YOLO อ่านเดี่ยว = ส่งตรวจเสมอ
+    YOLO ใช้ไม่ได้ (ไม่ได้ลง/โหลดไม่ได้/ปิดไว้) = คืนผล EasyOCR เดิมทุกอย่าง"""
+    if not yolo_engine.enabled():
+        return e
+    try:
+        y = yolo_engine.read(jpeg)
+    except Exception as ex:  # noqa: BLE001
+        e["yolo"] = {"status": "ERROR", "error": f"{type(ex).__name__}: {str(ex)[:100]}"}
+        return e
+    e["yolo"] = {k: v for k, v in y.items() if k != "plate"}
+    e["yolo"]["plate"] = y.get("plate")
+    yp, ep = y.get("plate"), (e.get("plate_norm") or "")
+    if not yp:
+        return e
+    std = pu.is_standard(yp)
+    shown = pu.display(yp) if std else yp
+    raws = list(e.get("raw") or []) + ["yolo:" + yp]
+    base = {**e, "raw": raws, "province_code": y.get("province_code"), "yolo": e["yolo"]}
+    if ep and ep == yp and std:
+        conf = round(max(float(e.get("confidence") or 0), float(y.get("mean_conf") or 0)), 3)
+        return {**base, "found": True, "status": "VERIFIED", "needs_review": False, "plate": shown, "plate_norm": yp,
+                "standard_format": True, "confidence": conf, "provider": "yolo+easyocr", "internal_agree": True}
+    out = {**base, "found": True, "status": "NEEDS_REVIEW", "needs_review": True, "plate": shown, "plate_norm": yp,
+           "standard_format": std, "confidence": round(float(y.get("mean_conf") or 0) * 0.9, 3), "provider": "yolo"}
+    if ep and ep != yp:
+        out["conflict"] = sorted({yp, ep})
+        out["provider"] = "yolo+easyocr"
+    return out
+
 def run_engine(name: str, images: list[bytes]) -> dict:
     """รันเครื่องยนต์เดียว ผลของแต่ละตัวแยกกันเสมอ (ไม่เขียนทับกัน) · วัดเวลา/หน่วยความจำจริง"""
     t0 = time.time()
@@ -184,6 +214,7 @@ def run_engine(name: str, images: list[bytes]) -> dict:
             else:
                 out = decide(_frames(images, ocr_service.read, None))
                 out["provider"] = "easyocr"
+                out = _with_yolo(out, images[0])
         else:
             return {"engine": name, "status": "UNAVAILABLE", "error": "unknown engine", "ms": 0}
     except Exception as e:  # noqa: BLE001 — ล้มเหลว/หมดเวลา: รายงานตรง ๆ ไม่แต่งผล
@@ -216,7 +247,7 @@ def _final(results: dict) -> dict:
         return {**best, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": best.get("engine"), "conflict": sorted(p for p in plates if p)}
     if ok(t) and a is not None and alive(a) and not a.get("plate"):  # AI ตอบแล้วแต่ไม่เห็นป้ายเลย
         return {**t, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": "tesseract", "ai_no_confirm": True}
-    if ok(a) and t is not None and alive(t) and not t.get("plate"):  # Tesseract ตอบแล้วแต่ไม่เห็น = EasyOCR เดี่ยวไม่ผ่านอัตโนมัติ (ข้อมูลจริง: ผ่านเดี่ยวแล้วผิดได้)
+    if ok(a) and t is not None and alive(t) and not t.get("plate") and not a.get("internal_agree"):  # (YOLO+EasyOCR ตรงกันเองแล้ว = ไม่ต้องรอ Tesseract) Tesseract ตอบแล้วแต่ไม่เห็น = EasyOCR เดี่ยวไม่ผ่านอัตโนมัติ (ข้อมูลจริง: ผ่านเดี่ยวแล้วผิดได้)
         return {**a, "status": "NEEDS_REVIEW", "needs_review": True, "decided_by": "ai", "tess_no_confirm": True}
     if ok(t):
         return {**t, "decided_by": "tesseract"}

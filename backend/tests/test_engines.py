@@ -17,15 +17,20 @@ def calls(monkeypatch):
 
 IMG = [b"x"]
 
-def test_tesseract_verified_never_calls_ai(calls):
-    log, t = calls; t["tesseract"] = _res("tesseract", "VERIFIED", "กข1234")
+def test_both_engines_run_in_parallel_and_agree(calls):
+    log, t = calls; t["tesseract"] = _res("tesseract", "VERIFIED", "กข1234"); t["ai"] = _res("ai", "VERIFIED", "กข1234")
     r = rs.process(IMG, ("tesseract", "ai"), True)
-    assert log == ["tesseract"] and r["status"] == "VERIFIED" and r["decided_by"] == "tesseract"
+    assert sorted(log) == ["ai", "tesseract"] and r["status"] == "VERIFIED" and r["agree"]
 
-def test_fallback_to_ai_when_tesseract_fails(calls):
+def test_tesseract_verified_alone_needs_ai_confirmation(calls):
+    log, t = calls; t["tesseract"] = _res("tesseract", "VERIFIED", "กข1234"); t["ai"] = _res("ai", "FAILED")
+    r = rs.process(IMG, ("tesseract", "ai"), True)
+    assert r["status"] == "NEEDS_REVIEW" and r.get("ai_no_confirm")
+
+def test_ai_verified_but_tesseract_disagrees_goes_to_review(calls):
     log, t = calls; t["tesseract"] = _res("tesseract", "NEEDS_REVIEW", "1234", .8); t["ai"] = _res("ai", "VERIFIED", "กข1234")
     r = rs.process(IMG, ("tesseract", "ai"), True)
-    assert log == ["tesseract", "ai"] and r["status"] == "VERIFIED" and r["decided_by"] == "ai"
+    assert sorted(log) == ["ai", "tesseract"] and r["status"] == "NEEDS_REVIEW" and r["conflict"]
 
 def test_fallback_off_means_ai_not_called(calls):
     log, t = calls; t["tesseract"] = _res("tesseract", "NEEDS_REVIEW", "1234", .8); t["ai"] = _res("ai", "VERIFIED", "กข1234")

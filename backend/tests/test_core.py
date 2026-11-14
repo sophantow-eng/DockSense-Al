@@ -58,3 +58,29 @@ def test_near_match_is_suggestion_only(monkeypatch):
     monkeypatch.setattr(known_plates, "get", lambda: frozenset({"กข1234"}))
     r = rs.decide([_frame("กข1284", .95, "a")])
     assert r["plate_norm"] == "กข1284" and r["suggestion"] == "กข1234" and r["known_vehicle"] is False
+
+
+def test_with_yolo_agree_conflict_and_solo(monkeypatch):
+    from app import recognition_service as rs, yolo_engine
+    monkeypatch.setattr(yolo_engine, "enabled", lambda: True)
+    base = lambda p: {"found": True, "status": "NEEDS_REVIEW", "plate": p, "plate_norm": p, "confidence": 0.6, "raw": [p], "needs_review": True}
+    y = lambda p, m=0.9: {"status": "OK", "plate": p, "min_conf": m, "mean_conf": m, "province_code": "BKK", "plate_found": True, "n_chars": len(p or "")}
+    monkeypatch.setattr(yolo_engine, "read", lambda j: y("1กฆ9151"))
+    o = rs._with_yolo(base("1กฆ9151"), b"x")          # ตรงกัน → ผ่าน
+    assert o["status"] == "VERIFIED" and o["plate"] == "1กฆ 9151" and o.get("internal_agree") and o["province_code"] == "BKK"
+    o = rs._with_yolo(base("1กม9151"), b"x")          # ไม่ตรง → ตรวจ + conflict
+    assert o["status"] == "NEEDS_REVIEW" and o["conflict"] == sorted({"1กฆ9151", "1กม9151"})
+    o = rs._with_yolo({"found": False, "status": "FAILED", "plate": None, "raw": []}, b"x")   # EasyOCR ไม่เห็น → YOLO เดี่ยวไม่ผ่านเอง
+    assert o["status"] == "NEEDS_REVIEW" and o["plate"] == "1กฆ 9151" and not o.get("internal_agree")
+    monkeypatch.setattr(yolo_engine, "read", lambda j: y(None))
+    e = base("1กฆ9151"); assert rs._with_yolo(e, b"x")["status"] == "NEEDS_REVIEW" and rs._with_yolo(e, b"x")["plate"] == "1กฆ9151"
+    monkeypatch.setattr(yolo_engine, "enabled", lambda: False)
+    assert rs._with_yolo(e, b"x") is e
+
+def test_final_internal_agree_not_blocked_by_silent_tesseract():
+    from app import recognition_service as rs
+    a = {"engine": "ai", "status": "VERIFIED", "plate": "1กฆ 9151", "plate_norm": "1กฆ9151", "confidence": 0.9, "internal_agree": True}
+    t = {"engine": "tesseract", "status": "FAILED", "plate": None}
+    assert rs._final({"tesseract": t, "ai": a})["status"] == "VERIFIED"
+    a2 = {**a}; a2.pop("internal_agree")
+    assert rs._final({"tesseract": t, "ai": a2})["status"] == "NEEDS_REVIEW"
