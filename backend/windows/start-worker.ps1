@@ -25,4 +25,7 @@ if (-not $env:TESS_LANG) { $env:TESS_LANG = "tha+eng" }
 $env:OMP_NUM_THREADS = "4"
 if ($env:QUEUE_URL -and $env:QUEUE_KEY) { Write-Host "Queue mode ON: pulling jobs from the cloud (no tunnel needed)" } else { Write-Host "Queue mode OFF (no queue.env)" }
 Write-Host "Starting at http://127.0.0.1:8000  (stop: Ctrl+C)"
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+# cmd /c merges stderr into stdout inside cmd, so PowerShell never turns uvicorn's log lines into errors
+# (with log redirection + ErrorActionPreference=Stop, the first stderr line used to kill the worker silently).
+$ErrorActionPreference = "Continue"
+cmd /c "python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 2>&1"
