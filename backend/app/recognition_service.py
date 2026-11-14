@@ -81,6 +81,8 @@ def read_frame(img, reader=None, variant_names=None) -> dict:
                 continue
             if ti > 0 and not slow and name not in ("orig", "clahe"):
                 continue   # เป้าหมายสำรองใช้แค่ 2 แบบภาพ (คุมเวลา)
+            if cands and time.time() - t0 > config.READ_BUDGET:
+                done = True; break   # งบเวลาต่อภาพ: ข้อมูลจริงบางภาพใช้ 20-29 วินาที (เกินเวลารอของกล้อง) — หยุดแล้วใช้ผลที่ได้ ไม่เดาเพิ่ม
             text, conf = _combine(reader(v))
             if text:
                 cands.append({"variant": name, "text": text, "conf": conf, "std": pu.is_standard(text)})

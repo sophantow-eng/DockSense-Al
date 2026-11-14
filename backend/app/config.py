@@ -31,3 +31,4 @@ AI_WORKER_URL = os.environ.get("AI_WORKER_URL", "")
 AI_WORKER_KEY = os.environ.get("AI_WORKER_KEY", "")
 AI_LOCAL = os.environ.get("AI_LOCAL", "") == "1"
 AI_TIMEOUT = _f("AI_TIMEOUT", 20)
+READ_BUDGET = _f("READ_BUDGET", 9)   # วินาทีสูงสุดที่ใช้ลองแบบภาพต่อ 1 ภาพ (หลังมีผลอย่างน้อย 1 ค่า)
