@@ -78,6 +78,8 @@ def read(jpeg: bytes) -> dict:
     if img is None:
         return {"status": "ERROR", "error": "bad_image", "plate": None}
     d = det.predict(img, imgsz=640, conf=0.2, verbose=False)[0]
+    if not len(d.boxes):   # หาป้ายไม่เจอ → ลองใหม่แบบละเอียดขึ้น (ใช้เฉพาะตอนพลาด ใบที่เจอแล้วไม่ถูกแตะ; ผลยังต้องตรงกับ EasyOCR ถึงผ่าน)
+        d = det.predict(img, imgsz=1280, conf=0.15, verbose=False)[0]
     crop, found = img, False
     if len(d.boxes):
         bi = max(range(len(d.boxes)), key=lambda i: float(d.boxes[i].conf))
