@@ -485,11 +485,12 @@ async function phoneCam() {
     ch.subscribe((st, err) => { if (st === "SUBSCRIBED") { ch.track({ phone: 1 }); } if (st === "CHANNEL_ERROR") DS.toast("เชื่อมต่อภาพสดไม่ได้ " + ((err && err.message) || ""), "error"); });
     const beat = async () => { const { error } = await db.from("phone_cams").upsert({ id, name, seen_at: new Date().toISOString() }); if (error) { const i = q("#pcInfo"); if (i) i.textContent = "ประกาศกล้องให้คนอื่นเห็นไม่ได้: " + error.message; } };
     await beat(); beatT = setInterval(beat, 6000);
-    running = true; go.disabled = false; go.textContent = "หยุดส่งภาพ"; info(); say("เริ่มทำงานแล้ว — ส่งภาพสด + ถ่ายทะเบียนเองเมื่อเห็นป้ายนิ่ง");
+    running = true; go.disabled = false; go.textContent = "หยุดส่งภาพ"; info();
     // ถ่ายทะเบียนอัตโนมัติ: ภาพในกรอบเปลี่ยน (รถเข้า) แล้วนิ่ง → อ่านและบันทึกเอง (ไม่ตรวจซ้ำเป็นรอบ เพื่อไม่กินโควตา AI)
     const sm = document.createElement("canvas"); sm.width = 32; sm.height = 24; const sctx = sm.getContext("2d", { willReadFrequently: true });
     let prev = null, changed = false, calm = 0, lastOcr = 0, ocrBusy = false;
     let savedN = 0; const say = (t) => { const e = q("#pcAuto2"); if (e) e.textContent = t; const c = q("#pcChip"); if (c) { c.style.display = running ? "block" : "none"; c.textContent = (savedN ? "บันทึกแล้ว " + savedN + " คัน · " : "") + t; c.style.borderLeft = "4px solid " + (/^✓/.test(t) ? "#22c55e" : /ไม่|เบลอ/.test(t) ? "#f59e0b" : "#38bdf8"); } };
+    say("เริ่มทำงานแล้ว — ส่งภาพสด + ถ่ายทะเบียนเองเมื่อเห็นป้ายนิ่ง");
     // ตัวตรวจป้ายคล้ายทะเบียน (ในเครื่อง ไม่เสียโควตา): เห็นป้าย → ใหญ่พอ → นิ่ง → เลือกเฟรมคมสุด → ตัดเฉพาะป้ายส่งให้ AI
     const dc = document.createElement("canvas"), dctx = dc.getContext("2d", { willReadFrequently: true });
     const grayOf = (v) => { const DW = DSLive.cfg.detectW, k = DW / v.videoWidth; dc.width = DW; dc.height = Math.round(v.videoHeight * k); dctx.drawImage(v, 0, 0, dc.width, dc.height); const d = dctx.getImageData(0, 0, dc.width, dc.height).data, g = new Uint8Array(dc.width * dc.height); for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8; return { g, W: dc.width, H: dc.height }; };
