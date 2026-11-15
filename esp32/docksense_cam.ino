@@ -147,6 +147,12 @@ static bool initCamera() {
     Serial.printf("camera: sensor PID=0x%04x\n", s->id.PID);
     s->set_vflip(s, FLIP_VERTICAL ? 1 : 0);
     s->set_hmirror(s, MIRROR_HORIZONTAL ? 1 : 0);
+    // แสง/สีอัตโนมัติ: ให้เซนเซอร์ปรับเองตามแดด/เงา/ไฟส่องป้าย (OV2640 ไม่มีออโต้โฟกัส — โฟกัสหมุนที่เลนส์ครั้งเดียว ดู WIRING.md)
+    s->set_whitebal(s, 1); s->set_awb_gain(s, 1); s->set_wb_mode(s, 0);
+    s->set_exposure_ctrl(s, 1); s->set_aec2(s, 1); s->set_ae_level(s, 0);
+    s->set_gain_ctrl(s, 1); s->set_gainceiling(s, GAINCEILING_8X);
+    s->set_lenc(s, 1); s->set_bpc(s, 1); s->set_wpc(s, 1); s->set_dcw(s, 1);
+    s->set_brightness(s, 0); s->set_contrast(s, 1); s->set_saturation(s, 0);
   }
 
   for (int i = 0; i < 5; i++) {   // ทิ้งเฟรมแรก ๆ ให้แสงนิ่ง
@@ -359,14 +365,21 @@ static long probeLen() {
 static void ocrShot() {
   for (int attempt = 0; attempt < 2; attempt++) {
     if (USE_FLASH) { digitalWrite(LED_FLASH_PIN, HIGH); delay(120); }
-    uint8_t *a = nullptr, *b = nullptr; size_t la = 0, lb = 0; bool fa = false, fb = false;
-    bool oka = captureJpeg(&a, &la, &fa, JPEG_QUALITY);
-    delay(150);
-    bool okb = captureJpeg(&b, &lb, &fb, JPEG_QUALITY);
-    if (USE_FLASH) digitalWrite(LED_FLASH_PIN, LOW);
+    // ถ่ายเตรียม 6 เฟรมทิ้งก่อน ให้ระบบแสงอัตโนมัติปรับเสร็จ (หลังไฟส่องป้ายเพิ่งติด) แล้วถ่ายจริง 4 เฟรม เลือกเฟรมที่ละเอียดที่สุด
+    // (ภาพคม = ขอบตัวอักษรเยอะ = ไฟล์ JPEG ใหญ่กว่า ภาพเบลอ/มืดไฟล์เล็กกว่า)
+    if (nativeJpeg && psramFound()) { sensor_t* sn = esp_camera_sensor_get(); if (sn && curSize != OCR_SIZE) { sn->set_framesize(sn, OCR_SIZE); curSize = OCR_SIZE; sn->set_quality(sn, OCR_SENSOR_Q); sensorQ = OCR_SENSOR_Q; } }
+    for (int i = 0; i < 6; i++) { camera_fb_t* d = esp_camera_fb_get(); if (d) esp_camera_fb_return(d); delay(70); }
     uint8_t* best = nullptr; size_t bl = 0; bool bf = false;
-    if (oka && (!okb || la >= lb)) { best = a; bl = la; bf = fa; if (okb && fb) free(b); }
-    else if (okb) { best = b; bl = lb; bf = fb; if (oka && fa) free(a); }
+    for (int i = 0; i < 4; i++) {
+      uint8_t* c = nullptr; size_t lc = 0; bool fc = false;
+      if (captureJpeg(&c, &lc, &fc, JPEG_QUALITY)) {
+        if (!best || lc > bl) { if (best && bf) free(best); best = c; bl = lc; bf = fc; }
+        else if (fc) free(c);
+      }
+      delay(90);
+    }
+    if (USE_FLASH) digitalWrite(LED_FLASH_PIN, LOW);
+    Serial.printf("ocr: picked sharpest of 4 frames = %u bytes\n", (unsigned)bl);
     if (!best) { blinkRed(4); continue; }
     serverRecognized = false;
     bool ok = postJpeg(best, bl, false, nullptr);

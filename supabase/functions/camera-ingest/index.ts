@@ -121,7 +121,8 @@ Deno.serve(async (req) => {
     // กันอ่านถี่เกิน (ประหยัดโควตา AI): ต่ออุปกรณ์ 1 ครั้งต่อ 30 วินาที (ภาพสดไม่ผ่าน AI จึงไม่กินโควตา)
     {
       const last = lastOcrAt.get(dev.id) || 0;
-      if (Date.now() - last < 30000) return json({ ok: true, skipped: "cooldown" });
+      // เดิม 30 วิ (ตอนยังกลัวโควตา AI) → รถคันถัดไปที่เข้ามาภายใน 30 วิถูกข้าม · ตอนนี้อ่านด้วยเครื่องฟรีก่อน จึงพอแค่กันยิงซ้ำคันเดิม (ภาพซ้ำเป๊ะมี same_frame กันอีกชั้น)
+      if (Date.now() - last < (isPhone ? 10000 : 6000)) return json({ ok: true, skipped: "cooldown" });
       lastOcrAt.set(dev.id, Date.now());
     }
 
@@ -174,21 +175,23 @@ Deno.serve(async (req) => {
       ocrRes = { ok: true } as Response;
       ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: weak.decided_by === "ai" ? aiProv(weak) : "tesseract", color: weak.vehicle_color ?? null } : { found: false };
     }
-    if (!ocrRes.ok) {
+    const wantRecord = !isPhone || new URL(req.url).searchParams.get("auto") === "1"; // ESP32 สั่งถ่ายด้วยเซ็นเซอร์ = มีรถจริง / มือถือโหมดอัตโนมัติ = เห็นป้ายจริง → ห้ามปล่อยหลุดเงียบๆ
+    const noRead = ocrRes.ok && (!ocr.found || !ocr.plate) && !weak;
+    if (!ocrRes.ok || (noRead && wantRecord)) {
       // AI อ่านไม่ได้ (เช่น โควตาเต็ม): เก็บภาพไว้ในหน้า "รอตรวจสอบ" ให้พนักงานพิมพ์ทะเบียนเอง (จำกัด 1 รายการ/นาที/อุปกรณ์)
       const lp = lastPending.get(dev.id) || 0;
-      if (Date.now() - lp < 60_000) { await dropLater(); return json({ ok: true, pending: false, error: ocr.error || "OCR failed", code: ocr.code, skipped: "pending_rate_limit" }); }
+      if (Date.now() - lp < (noRead ? 15_000 : 60_000)) { await dropLater(); return json({ ok: true, pending: false, error: ocr.error || "OCR failed", code: ocr.code, skipped: "pending_rate_limit" }); }
       lastPending.set(dev.id, Date.now());
       const ppath = path;
       const pu = await upP;
       if (pu.error) return json({ error: pu.error.message }, 500);
       const { data: pin, error: pe } = await sb.from("vehicle_logs").insert({
-        plate_number: "รอตรวจทะเบียน", note: `กล้อง: ${dev.name} — AI อ่านไม่ได้ (${ocr.code || "OCR_FAILED"}) กรุณาดูภาพแล้วพิมพ์ทะเบียน`,
+        plate_number: "รอตรวจทะเบียน", note: noRead ? `กล้อง: ${dev.name} — จับรถได้แต่อ่านทะเบียนไม่ออก กรุณาดูภาพแล้วพิมพ์ทะเบียน` : `กล้อง: ${dev.name} — AI อ่านไม่ได้ (${ocr.code || "OCR_FAILED"}) กรุณาดูภาพแล้วพิมพ์ทะเบียน`,
         image_path: ppath, ocr_confidence: 0, status: "needs_review", source: isPhone ? "phone" : "esp32",
       }).select("id").single();
       if (pe) return json({ error: pe.message }, 500);
       await bg(fetch(`${url}/functions/v1/notify-visit`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ visit_id: pin.id, force: true }) }).catch(() => null));
-      return json({ ok: true, pending: true, code: ocr.code || "OCR_FAILED" }, 200);
+      return json({ ok: true, pending: true, code: noRead ? "NO_PLATE_READ" : (ocr.code || "OCR_FAILED") }, 200);
     }
     if (!ocr.found || !ocr.plate) { await dropLater(); return json({ ok: true, found: false }); }
 
