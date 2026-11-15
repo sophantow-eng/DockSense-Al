@@ -766,9 +766,7 @@ function occRender() {
     return `<label class="row sp" style="gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:center"><span style="min-width:0"><b>${t}</b><br><span class="muted">${d}</span></span><span class="row" style="gap:8px;flex:none">${st}<input type="checkbox" class="occSw" data-k="${k}" ${occ[k] ? "checked" : ""} style="width:22px;height:22px"></span></label>`;
   }).join("");
   el.innerHTML = `<div class="card"><h3>ศูนย์ควบคุมการอ่านทะเบียน</h3>
-  ${occ.mode === "testing" ? '<p class="badge warn" style="display:block;margin:0 0 8px;white-space:normal">⚠️ โหมดทดสอบ: กล้องจริงจะ “ไม่บันทึกประวัติ” จนกว่าจะกลับไปโหมดใช้งานจริง</p>' : ""}
   ${occSt && occSt.err ? `<p class="muted wrapsafe">อ่านสถานะเครื่องยนต์ไม่ได้: ${esc(occSt.err)}</p>` : ""}
-  <div class="row" style="gap:8px;margin-bottom:6px"><button type="button" class="${occ.mode === "production" ? "" : "ghost"} occMode" data-m="production" style="flex:1">ใช้งานจริง</button><button type="button" class="${occ.mode === "testing" ? "" : "ghost"} occMode" data-m="testing" style="flex:1">ทดสอบ</button></div>
   ${sw}
   <p class="muted" style="margin:8px 0 0">สวิตช์ถูกบังคับที่เซิร์ฟเวอร์ (ฟังก์ชันรับภาพตรวจค่านี้ทุกครั้ง) ไม่ใช่แค่ปุ่มในหน้านี้</p></div>
   <div class="card"><h3>ทดสอบเทียบเครื่องยนต์</h3>
@@ -786,12 +784,6 @@ function occRender() {
     const { error } = await db.from("app_settings").upsert({ key: "ocr_control", value: next }, { onConflict: "key" });
     if (error) { c.checked = !c.checked; DS.toast("บันทึกไม่ได้: " + error.message, "error"); return; }
     occ = next; occRender(); DS.toast("บันทึกแล้ว");
-  }));
-  el.querySelectorAll(".occMode").forEach((b) => (b.onclick = async () => {
-    const next = { ...occ, mode: b.dataset.m };
-    const { error } = await db.from("app_settings").upsert({ key: "ocr_control", value: next }, { onConflict: "key" });
-    if (error) return DS.toast("บันทึกไม่ได้: " + error.message, "error");
-    occ = next; occRender();
   }));
   $("#occPick").onclick = () => $("#occFile").click();
   $("#occFile").onchange = (e) => { const f = e.target.files[0]; if (f) setBlob(f); };
