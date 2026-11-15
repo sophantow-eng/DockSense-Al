@@ -187,6 +187,11 @@ def _with_yolo(e: dict, jpeg: bytes, y: dict | None = None) -> dict:
         conf = round(max(float(e.get("confidence") or 0), float(y.get("mean_conf") or 0)), 3)
         return {**base, "found": True, "status": "VERIFIED", "needs_review": False, "plate": shown, "plate_norm": yp,
                 "standard_format": True, "confidence": conf, "provider": "yolo+easyocr", "internal_agree": True}
+    if not std and ep and pu.is_standard(ep):
+        # YOLO อ่านได้ตัวเกิน/ขาด (ไม่เป็นรูปทะเบียน) แต่ EasyOCR ได้รูปมาตรฐาน → แสดง EasyOCR เป็นตัวหลัก (ยังส่งตรวจเสมอ) เก็บของ YOLO ไว้ใน conflict ให้คนเทียบ
+        return {**base, "found": True, "status": "NEEDS_REVIEW", "needs_review": True, "plate": pu.display(ep), "plate_norm": ep,
+                "standard_format": True, "confidence": round(float(e.get("confidence") or 0) * 0.9, 3), "provider": "yolo+easyocr",
+                "conflict": sorted({yp, ep})}
     out = {**base, "found": True, "status": "NEEDS_REVIEW", "needs_review": True, "plate": shown, "plate_norm": yp,
            "standard_format": std, "confidence": round(float(y.get("mean_conf") or 0) * 0.9, 3), "provider": "yolo"}
     if ep and ep != yp:
