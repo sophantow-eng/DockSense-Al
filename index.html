@@ -489,7 +489,7 @@ async function phoneCam() {
     // ถ่ายทะเบียนอัตโนมัติ: ภาพในกรอบเปลี่ยน (รถเข้า) แล้วนิ่ง → อ่านและบันทึกเอง (ไม่ตรวจซ้ำเป็นรอบ เพื่อไม่กินโควตา AI)
     const sm = document.createElement("canvas"); sm.width = 32; sm.height = 24; const sctx = sm.getContext("2d", { willReadFrequently: true });
     let prev = null, changed = false, calm = 0, lastOcr = 0, ocrBusy = false;
-    let savedN = 0; const say = (t) => { const e = q("#pcAuto2"); if (e) e.textContent = t; const c = q("#pcChip"); if (c) { c.style.display = running ? "block" : "none"; c.textContent = (savedN ? "บันทึกแล้ว " + savedN + " คัน · " : "") + t; c.style.borderLeft = "4px solid " + (/^✓/.test(t) ? "#22c55e" : /ไม่|เบลอ/.test(t) ? "#f59e0b" : "#38bdf8"); } };
+    let savedN = 0, holdUntil = 0; const say = (t, force) => { if (!force && Date.now() < holdUntil) return; if (force) holdUntil = Date.now() + 8000; const e = q("#pcAuto2"); if (e) e.textContent = t; const c = q("#pcChip"); if (c) { c.style.display = running ? "block" : "none"; c.textContent = (savedN ? "บันทึกแล้ว " + savedN + " คัน · " : "") + t; c.style.borderLeft = "4px solid " + (/^✓/.test(t) ? "#22c55e" : /ไม่|เบลอ/.test(t) ? "#f59e0b" : "#38bdf8"); } };
     say("เริ่มทำงานแล้ว — ส่งภาพสด + ถ่ายทะเบียนเองเมื่อเห็นป้ายนิ่ง");
     // ตัวตรวจป้ายคล้ายทะเบียน (ในเครื่อง ไม่เสียโควตา): เห็นป้าย → ใหญ่พอ → นิ่ง → เลือกเฟรมคมสุด → ตัดเฉพาะป้ายส่งให้ AI
     const dc = document.createElement("canvas"), dctx = dc.getContext("2d", { willReadFrequently: true });
@@ -507,20 +507,22 @@ async function phoneCam() {
       const r = await fetch(CAM_URL + "?name=" + encodeURIComponent(name) + (auto ? "&auto=1" : ""), { method: "POST", headers: { Authorization: "Bearer " + session.access_token, apikey: window.DS_CONFIG.SUPABASE_KEY, "Content-Type": "image/jpeg" }, body: blob });
       return { ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) };
     };
+    const sayF = (t) => say(t, true);
     const doOcr = async (blob, auto) => {
-      ocrBusy = true; lastOcr = Date.now(); say("กำลังอ่านทะเบียน…");
+      ocrBusy = true; lastOcr = Date.now(); sayF("กำลังอ่านทะเบียน…");
       try {
         if (!blob) { const c = grab(1280); blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85)); }
         const { ok, status, j } = await send(blob, auto);
-        if (!ok) say("อ่านทะเบียนไม่สำเร็จ: " + (j.error || status));
-        else if (j.pending) { savedN++; say(j.code === "NO_PLATE_READ" ? "เห็นรถแต่อ่านทะเบียนไม่ออก — เก็บภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์แล้ว" : "AI อ่านไม่ได้ตอนนี้ — ส่งภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์ทะเบียนแล้ว"); }
-        else if (j.skipped === "cooldown") say("รอสักครู่… (กันอ่านถี่เกินไป)");
-        else if (j.skipped) say("ภาพไม่พร้อม (" + j.skipped + ") — รอเฟรมถัดไป");
-        else if (j.duplicate) say("เห็น " + j.plate + " (บันทึกไปแล้วเมื่อสักครู่)");
-        else if (j.plate) { savedN++; say("✓ บันทึกแล้ว: " + j.plate + (j.status === "needs_review" ? " (รอตรวจสอบ)" : "")); }
-        else if (j.pending_review || j.status === "needs_review") { savedN++; say("✓ บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
-        else say("ยังไม่พบป้ายทะเบียนในภาพ");
-      } catch (e) { say("อ่านทะเบียนไม่สำเร็จ"); }
+        if (!ok) sayF("อ่านทะเบียนไม่สำเร็จ: " + (j.error || status));
+        else if (j.pending) { savedN++; sayF(j.code === "NO_PLATE_READ" ? "เห็นรถแต่อ่านทะเบียนไม่ออก — เก็บภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์แล้ว" : "AI อ่านไม่ได้ตอนนี้ — ส่งภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์ทะเบียนแล้ว"); }
+        else if (j.skipped === "cooldown") sayF("รอสักครู่… (กันอ่านถี่เกินไป)");
+        else if (j.skipped === "testing_mode") sayF("⚠ ระบบอยู่ในโหมดทดสอบ จึงไม่บันทึก — ไปที่แท็บ AI แล้วสลับเป็น “ใช้งานจริง”");
+        else if (j.skipped) sayF("ภาพไม่พร้อม (" + j.skipped + ") — รอเฟรมถัดไป");
+        else if (j.duplicate) sayF("เห็น " + j.plate + " (บันทึกไปแล้วเมื่อสักครู่)");
+        else if (j.plate) { savedN++; sayF("✓ บันทึกแล้ว: " + j.plate + (j.status === "needs_review" ? " (รอตรวจสอบ)" : "")); }
+        else if (j.pending_review || j.status === "needs_review") { savedN++; sayF("✓ บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
+        else sayF("ยังไม่พบป้ายทะเบียนในภาพ");
+      } catch (e) { sayF("อ่านทะเบียนไม่สำเร็จ"); }
       ocrBusy = false;
     };
     q("#pcNow").onclick = async () => {
