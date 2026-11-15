@@ -122,7 +122,7 @@ def decide(frames: list[dict]) -> dict:
     # ความมั่นใจรวม = สัดส่วนคะแนนของผู้ชนะ × ความมั่นใจเฉลี่ยของเฟรมที่ให้ผู้ชนะ
     total = sum(votes.values())
     mine = [f["best"]["conf"] for f in frames if f["best"] and f["best"]["text"] == plate]
-    conf = round((score / total) * (sum(mine) / len(mine)), 3)
+    conf = round((score / total) * (sum(mine) / len(mine)), 3) if total > 0 and mine else 0.0   # ทุกเฟรมความมั่นใจ 0 = หารศูนย์ไม่ได้
     std = pu.is_standard(plate)
     near, exact = known_plates.nearest(plate)
     if n_indep == 1:

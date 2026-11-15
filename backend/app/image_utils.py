@@ -110,7 +110,7 @@ def find_text_blocks(img, k=3):
     for i, a in enumerate(comps):
         for j in range(i + 1, len(comps)):
             b = comps[j]
-            hr = a[3] / b[3]
+            hr = a[3] / max(1, b[3])
             if not (0.6 <= hr <= 1.67):
                 continue
             h = max(a[3], b[3])
@@ -146,7 +146,7 @@ def find_text_blocks(img, k=3):
                 ov = min(a["b"][2], b["b"][2]) - max(a["b"][0], b["b"][0])
                 vgap = max(a["b"][1], b["b"][1]) - min(a["b"][3], b["b"][3])
                 hh = max(a["h"], b["h"])
-                if ov > 0.3 * min(a["b"][2] - a["b"][0], b["b"][2] - b["b"][0]) and vgap < 2.2 * hh and 0.6 <= a["h"] / b["h"] <= 1.67:
+                if ov > 0.3 * min(a["b"][2] - a["b"][0], b["b"][2] - b["b"][0]) and vgap < 2.2 * hh and 0.6 <= a["h"] / max(1, b["h"]) <= 1.67:
                     a["b"] = [min(a["b"][0], b["b"][0]), min(a["b"][1], b["b"][1]), max(a["b"][2], b["b"][2]), max(a["b"][3], b["b"][3])]
                     a["ang"] = a["ang"] if a["h"] >= b["h"] else b["ang"]; a["n"] += b["n"]; a["h"] = max(a["h"], b["h"]); a["ring"] = (a["ring"] + b["ring"]) / 2
                     rows.pop(j); merged = True; break

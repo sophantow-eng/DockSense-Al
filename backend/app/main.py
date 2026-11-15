@@ -135,7 +135,9 @@ async def test(request: Request, mode: str = "compare", files: list[UploadFile] 
         return {"mode": mode, "results": out.pop("engines"), "final": out}
 
     try:
-        return {"test": True, **(await run_in_threadpool(_guarded, run))}
+        # AI ผ่านคิว/เวิร์กเกอร์บนคอมไม่ใช้ CPU ของ Render → ไม่ต้องแย่งช่อง Tesseract (กัน 429 ตอนกดทดสอบหลายเครื่องพร้อมกัน)
+        offload = mode == "ai" and ai_engine.status().get("kind") in ("queue", "worker")
+        return {"test": True, **(await run_in_threadpool(run) if offload else await run_in_threadpool(_guarded, run))}
     except HTTPException:
         raise
     except Exception:
