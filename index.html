@@ -530,10 +530,45 @@ async function phoneCam() {
       ocrBusy = false; armed = false; doOcr(best);
     };
     let armed = true, stable = 0, last = null, goneAt = 0, grabbing = false, trk = null, seenAt = 0, blurN = 0, frameQ = null, blurTry = 0;
+    // ---- ตรวจ "รถเข้า → นิ่ง → ถ่าย → รถออก" จากการเปลี่ยนของภาพ (ไม่ต้องเห็นป้ายชัดก่อน) ----
+    // จำภาพพื้นหลังว่างตอนเริ่ม · ภาพต่างจากพื้นหลังและนิ่ง = มีรถ → ถ่าย 1 ครั้ง · ภาพกลับเป็นพื้นหลัง = รถออก → พร้อมคันต่อไป
+    // ถ่ายแล้วอ่านไม่ออกจะไม่สร้างรายการขยะ (กันกรณีคนเดินผ่าน) — ต่างจากโหมดเห็นป้ายชัดที่เก็บภาพไว้ให้คนตรวจ
+    const mo = { prev: null, empty: null, shot: null, calm: 0, occ: false, lastShot: 0, burst: false };
+    const tiny = (g, W, H) => { const GX = 48, GY = 36, o = new Float32Array(GX * GY), c = new Uint16Array(GX * GY); for (let y = 0; y < H; y += 2) { const gy = Math.min(GY - 1, (y * GY / H) | 0); for (let x = 0; x < W; x += 2) { const k = gy * GX + Math.min(GX - 1, (x * GX / W) | 0); o[k] += g[y * W + x]; c[k]++; } } for (let i = 0; i < o.length; i++) o[i] /= c[i] || 1; return o; };
+    const dif = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) t += Math.abs(a[i] - b[i]); return t / a.length; };
+    const motionStep = (g, W, H) => {
+      const cur = tiny(g, W, H), now = Date.now(), mv = mo.prev ? dif(cur, mo.prev) : 99; mo.prev = cur;
+      mo.calm = mv < 2.2 ? mo.calm + 1 : 0; if (mv > 8) mo.burst = true;
+      if (!mo.empty) { if (mo.calm >= 8) { mo.empty = cur; say("จำพื้นหลังแล้ว — รอรถเข้ากรอบ"); } else say("กำลังจำภาพพื้นหลังว่าง (ตอนนี้ยังไม่ควรมีรถหรือคนในกรอบ)…"); return false; }
+      const dE = dif(cur, mo.empty);
+      if (!mo.occ) {
+        if (mo.calm >= 6 && dE < 5) for (let i = 0; i < cur.length; i++) mo.empty[i] += (cur[i] - mo.empty[i]) * 0.2; // ปรับตามแสงที่ค่อยๆ เปลี่ยน
+        if (dE > 9) {
+          if (mo.calm < 3) { say("พบการเคลื่อนไหว — รอให้รถนิ่ง…"); return false; }
+          if (now - mo.lastShot < 5000) return false;
+          mo.occ = true; mo.shot = cur; mo.lastShot = now; mo.burst = false; return true;
+        }
+        say("พร้อม: รอรถเข้ากรอบ"); return false;
+      }
+      if (dE < 5 && mo.calm >= 3) { mo.occ = false; mo.shot = null; mo.burst = false; say("รถออกแล้ว — รอคันต่อไป"); return false; }
+      if (mo.calm >= 3 && mo.burst && mo.shot && dif(cur, mo.shot) > 16 && now - mo.lastShot > 5000) { mo.shot = cur; mo.lastShot = now; mo.burst = false; return true; } // คันใหม่ต่อท้ายทันที ไม่ทันเห็นกรอบว่าง
+      return false;
+    };
+    const shoot = async (v) => {
+      grabbing = true; say("รถนิ่งแล้ว — กำลังถ่ายและเลือกเฟรมที่คมที่สุด…");
+      let bestS = -1, best = null;
+      for (let n = 0; n < 3; n++) {
+        const f = grayOf(v), rr = window.DSPlate.detect(f.g, f.W, f.H), sh = window.DSPlate.sharpness(f.g, f.W, f.H, Math.floor(f.W * 0.15), Math.floor(f.H * 0.15), Math.floor(f.W * 0.7), Math.floor(f.H * 0.7));
+        if (sh > bestS) { bestS = sh; best = rr ? await cropBlob(rr, f.W, f.H) : await new Promise((ok) => { const c = grab(1600); if (!c) return ok(null); c.toBlob(ok, "image/jpeg", 0.88); }); }
+        await new Promise((ok) => setTimeout(ok, 150));
+      }
+      grabbing = false; armed = false; stable = 0; last = null;
+      if (best) doOcr(best, false);
+    };
     autoT = DSLive.loop("detect", { pauseHidden: true, everyMs: () => DSLive.cfg.detectMs, run: async () => {
       const on = q("#pcAuto") && q("#pcAuto").checked; if (!on) { box(null); const sx = q("#pcScan"); if (sx) sx.style.display = "none"; trk = null; return; }
       if (!running || ocrBusy || grabbing) return; const v = q("#pcV"); if (!v.videoWidth) return;
-      if (Date.now() - flipAt < 2500) { last = null; stable = 0; return; }
+      if (Date.now() - flipAt < 2500) { last = null; stable = 0; mo.empty = null; mo.prev = null; mo.occ = false; return; }
       const { g, W, H } = grayOf(v), r0 = window.DSPlate.detect(g, W, H), now = Date.now();
       { // ตรวจความคม/ความสว่างทั้งภาพ (ตรงกลาง 60%) → สั่งโฟกัสใหม่หรือเปิดไฟฉายเอง
         let sum = 0, n = 0; for (let y = Math.floor(H * 0.2); y < H * 0.8; y += 2) for (let x = Math.floor(W * 0.2); x < W * 0.8; x += 2) { sum += g[y * W + x]; n++; }
@@ -541,6 +576,7 @@ async function phoneCam() {
         autoTorch(mean); frameQ = { mean, sh };
         if (sh < 12 && mean >= 40) { blurN++; if (blurN >= 3) { nudgeFocus(); blurN = 0; } } else blurN = 0;
       }
+      if (motionStep(g, W, H)) { await shoot(v); return; }
       // สแกนทั้งเฟรมทุกรอบ · เจอป้าย = กรอบเขียว/ส้มตามติดแบบนุ่ม (ไม่สั่น) · หลุดเฟรมสั้นๆ (<0.7 วิ) กรอบค้างไว้ · หายนาน = กลับไปสแกนหาต่อ
       const sc = (on) => { const e = q("#pcScan"); if (e) e.style.display = on ? "block" : "none"; };
       if (r0) { trk = (trk && Math.hypot(r0.x + r0.w / 2 - trk.x - trk.w / 2, r0.y + r0.h / 2 - trk.y - trk.h / 2) / W < 0.15) ? { x: trk.x + (r0.x - trk.x) * 0.45, y: trk.y + (r0.y - trk.y) * 0.45, w: trk.w + (r0.w - trk.w) * 0.45, h: trk.h + (r0.h - trk.h) * 0.45 } : { x: r0.x, y: r0.y, w: r0.w, h: r0.h }; seenAt = now; }
@@ -549,7 +585,7 @@ async function phoneCam() {
         last = null; stable = 0;
         if (trk) { box(trk, W, H, false); sc(false); return; }
         box(null); sc(true); if (!goneAt) goneAt = now;
-        if (!armed && now - goneAt > 3000) { armed = true; say("พร้อม: รอรถคันถัดไป"); } else if (armed) say("กำลังสแกนหาป้ายทะเบียนทั้งภาพ…");
+        if (!armed && now - goneAt > 3000) armed = true;
         return;
       }
       goneAt = 0; sc(false);
