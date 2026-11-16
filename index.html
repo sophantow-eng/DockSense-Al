@@ -395,7 +395,7 @@ async function phoneCam() {
   const uid = (me && me.id) || "u", id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)), defName = "มือถือ " + ((me.full_name || "").trim().split(/\s+/)[0] || "ของฉัน");
   const m = DS.modal("📱 ใช้มือถือเป็นกล้อง", `<p class="muted" style="margin-top:0">เครื่องนี้จะส่งภาพสดให้ทุกคนที่ล็อกอินเลือกดูได้ และกดถ่ายทะเบียนจากภาพนี้ได้ <b>เปิดหน้านี้ค้างไว้และไม่ล็อกหน้าจอ</b></p>
     <label>ชื่อกล้อง</label><input id="pcName" value="${esc(defName)}" maxlength="30">
-    <div class="camwrap fit" style="margin-top:10px"><video id="pcV" muted playsinline autoplay></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcScan" class="scanline" style="display:none"></div><div id="pcChip" style="position:absolute;left:8px;right:8px;bottom:8px;padding:8px 12px;border-radius:10px;background:rgba(8,16,32,.82);color:#fff;font-size:.92rem;line-height:1.35;pointer-events:none;display:none"></div><div id="pcBox" class="lockbox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
+    <div class="camwrap fit" style="margin-top:10px"><video id="pcV" muted playsinline autoplay></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcScan" class="scanline" style="display:none"></div><div id="pcChip" style="position:absolute;left:8px;right:8px;bottom:8px;padding:8px 12px;border-radius:10px;background:rgba(8,16,32,.82);color:#fff;font-size:.92rem;line-height:1.35;pointer-events:none;display:none"></div><div id="pcGly" style="position:absolute;inset:0;pointer-events:none;display:none"></div><div id="pcBox" class="lockbox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
     <p class="muted" id="pcInfo" style="margin:8px 0 0"></p>
     <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="pcAuto" checked style="width:auto;min-height:0"> ถ่ายทะเบียนอัตโนมัติเมื่อเห็นป้ายเข้าใกล้และนิ่ง (ตรวจในเครื่อง ไม่เสียโควตา AI — เรียก AI เมื่อป้ายชัดแล้วเท่านั้น)</label><p class="muted" id="pcAuto2" style="margin:4px 0 0"></p>
     <div class="actbar"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcNow" type="button">อ่านทะเบียนตอนนี้</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
@@ -495,6 +495,11 @@ async function phoneCam() {
     const dc = document.createElement("canvas"), dctx = dc.getContext("2d", { willReadFrequently: true });
     const grayOf = (v) => { const DW = DSLive.cfg.detectW, k = DW / v.videoWidth; dc.width = DW; dc.height = Math.round(v.videoHeight * k); dctx.drawImage(v, 0, 0, dc.width, dc.height); const d = dctx.getImageData(0, 0, dc.width, dc.height).data, g = new Uint8Array(dc.width * dc.height); for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8; return { g, W: dc.width, H: dc.height }; };
     const box = (r, W, H, ok) => { const b = q("#pcBox"); if (!b) return; if (!r) { b.style.display = "none"; return; } b.style.display = "block"; b.style.left = (r.x / W * 100) + "%"; b.style.top = (r.y / H * 100) + "%"; b.style.width = (r.w / W * 100) + "%"; b.style.height = (r.h / H * 100) + "%"; b.style.borderColor = ok ? "#22c55e" : "#f59e0b"; };
+    // วงรีแดงรอบตัวอักษร/ตัวเลขแต่ละตัวบนป้าย (หาจากรูปร่างตัวหนังสือในเครื่อง ไม่ใช่ผลอ่าน) · ใช้ div ซ้ำ ไม่สร้างใหม่ทุกเฟรม = เบา
+    const gly = (list, W, H) => { const c = q("#pcGly"); if (!c) return; if (!list || !list.length) { c.style.display = "none"; return; } c.style.display = "block";
+      while (c.children.length < list.length) { const d = document.createElement("div"); d.style.cssText = "position:absolute;border:2.5px solid #ef4444;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.35)"; c.appendChild(d); }
+      for (let k = 0; k < c.children.length; k++) { const d = c.children[k], g = list[k]; if (!g) { d.style.display = "none"; continue; } const pw = g.w * 0.28 + 3, ph = g.h * 0.18 + 3;
+        d.style.display = "block"; d.style.left = ((g.x - pw) / W * 100) + "%"; d.style.top = ((g.y - ph) / H * 100) + "%"; d.style.width = ((g.w + 2 * pw) / W * 100) + "%"; d.style.height = ((g.h + 2 * ph) / H * 100) + "%"; } };
     // r = ตำแหน่งป้ายในภาพเล็ก; คืนรูปตัดเฉพาะป้าย (เผื่อขอบ) ความละเอียดจากกล้องจริง — เล็กกว่าและชัดกว่าส่งภาพเต็ม
     const cropBlob = (r, W, H, ratioH) => new Promise((ok) => {
       const v = q("#pcV"), kx = v.videoWidth / W, ky = v.videoHeight / H;
@@ -564,7 +569,7 @@ async function phoneCam() {
       grabbing = true; say("รถนิ่งแล้ว — กำลังถ่ายและเลือกเฟรมที่คมที่สุด…");
       let bestS = -1, best = null;
       for (let n = 0; n < 3; n++) {
-        const f = grayOf(v), rr = window.DSPlate.detect(f.g, f.W, f.H), sh = window.DSPlate.sharpness(f.g, f.W, f.H, Math.floor(f.W * 0.15), Math.floor(f.H * 0.15), Math.floor(f.W * 0.7), Math.floor(f.H * 0.7));
+        const f = grayOf(v), rr = window.DSPlate.detectFull(f.g, f.W, f.H), sh = window.DSPlate.sharpness(f.g, f.W, f.H, Math.floor(f.W * 0.15), Math.floor(f.H * 0.15), Math.floor(f.W * 0.7), Math.floor(f.H * 0.7));
         if (sh > bestS) { bestS = sh; best = rr ? await cropBlob(rr, f.W, f.H) : await new Promise((ok) => { const c = grab(1600); if (!c) return ok(null); c.toBlob(ok, "image/jpeg", 0.88); }); }
         await new Promise((ok) => setTimeout(ok, 150));
       }
@@ -572,10 +577,10 @@ async function phoneCam() {
       if (best) doOcr(best, false);
     };
     autoT = DSLive.loop("detect", { pauseHidden: true, everyMs: () => DSLive.cfg.detectMs, run: async () => {
-      const on = q("#pcAuto") && q("#pcAuto").checked; if (!on) { box(null); const sx = q("#pcScan"); if (sx) sx.style.display = "none"; trk = null; return; }
+      const on = q("#pcAuto") && q("#pcAuto").checked; if (!on) { box(null); gly(null); const sx = q("#pcScan"); if (sx) sx.style.display = "none"; trk = null; return; }
       if (!running || ocrBusy || grabbing) return; const v = q("#pcV"); if (!v.videoWidth) return;
       if (Date.now() - flipAt < 2500) { last = null; stable = 0; mo.empty = null; mo.prev = null; mo.occ = false; return; }
-      const { g, W, H } = grayOf(v), r0 = window.DSPlate.detect(g, W, H), now = Date.now();
+      const { g, W, H } = grayOf(v), r0 = window.DSPlate.detectFull(g, W, H), now = Date.now();
       { // ตรวจความคม/ความสว่างทั้งภาพ (ตรงกลาง 60%) → สั่งโฟกัสใหม่หรือเปิดไฟฉายเอง
         let sum = 0, n = 0; for (let y = Math.floor(H * 0.2); y < H * 0.8; y += 2) for (let x = Math.floor(W * 0.2); x < W * 0.8; x += 2) { sum += g[y * W + x]; n++; }
         const mean = n ? sum / n : 128, sh = window.DSPlate.sharpness(g, W, H, Math.floor(W * 0.2), Math.floor(H * 0.2), Math.floor(W * 0.6), Math.floor(H * 0.6));
@@ -589,14 +594,14 @@ async function phoneCam() {
       else if (trk && now - seenAt > 700) trk = null;
       if (!r0) {
         last = null; stable = 0;
-        if (trk) { box(trk, W, H, false); sc(false); return; }
-        box(null); sc(true); if (!goneAt) goneAt = now;
+        if (trk) { box(trk, W, H, false); gly(null); sc(false); return; }
+        box(null); gly(null); sc(true); if (!goneAt) goneAt = now;
         if (!armed && now - goneAt > 3000) armed = true;
         return;
       }
       goneAt = 0; sc(false);
       const r = r0, big = r.w / W >= 0.12;
-      box(trk, W, H, big && (stable >= 1 || !armed));
+      box(trk, W, H, big && (stable >= 1 || !armed)); gly(r.glyphs && r.glyphs.length >= 4 ? r.glyphs : null, W, H);
       if (!armed) {
         // ป้ายใหม่ (ตำแหน่ง/ขนาดต่างจากที่เพิ่งถ่าย) หรือผ่านไป 45 วิ → พร้อมถ่ายใหม่เองโดยไม่ต้องรอกรอบว่าง (ถ้าทะเบียนซ้ำ ระบบหลังบ้านกันซ้ำให้)
         const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -613,7 +618,7 @@ async function phoneCam() {
       grabbing = true; say("ป้ายนิ่งแล้ว กำลังเลือกเฟรมที่คมที่สุด…");
       let bestS = -1, bestR = r, bestBlob = null;
       for (let n = 0; n < 3; n++) {
-        const f = grayOf(v), rr = window.DSPlate.detect(f.g, f.W, f.H) || r, sh = window.DSPlate.sharpness(f.g, f.W, f.H, rr.x, rr.y, rr.w, rr.h);
+        const f = grayOf(v), rr = window.DSPlate.detectFull(f.g, f.W, f.H) || r, sh = window.DSPlate.sharpness(f.g, f.W, f.H, rr.x, rr.y, rr.w, rr.h);
         if (sh > bestS) { bestS = sh; bestR = rr; bestBlob = await cropBlob(rr, f.W, f.H); }
         await new Promise((ok) => setTimeout(ok, 150));
       }

@@ -60,6 +60,79 @@
     for (let j = y; j < y1; j++) for (let i = x; i < x1; i++) { const k = j * W + i, l = 4 * g[k] - g[k - 1] - g[k + 1] - g[k - W] - g[k + W]; s += l; s2 += l * l; n++; }
     if (!n) return 0; const m = s / n; return s2 / n - m * m;
   }
-  root.DSPlate = { detect, sharpness };
+  /* glyphs(gray,W,H,rect) → {x,y,w,h,list:[{x,y,w,h}...]} หรือ null
+     หา "ตัวอักษร/ตัวเลขทีละตัว" ในและรอบกรอบที่ detect ได้ (ไม่ใช่การอ่านตัวอักษร — แค่หาก้อนตัวหนังสือสูงเท่ากันเรียงแถวเดียวกัน)
+     ใช้ 2 อย่าง: ขยับกรอบเขียวให้ครอบทั้งแถวทะเบียน และวางวงรีแดงรอบแต่ละตัว · เบา: ลดภาพให้สูง ≤ ~70px ก่อนวิเคราะห์ */
+  function glyphs(g, W, H, r) {
+    // กรอบที่ detect ได้อาจจับแค่บรรทัดจังหวัดหรือครึ่งเดียวของแถวทะเบียน → ขยายขึ้นด้านบนมาก (แถวทะเบียนอยู่เหนือบรรทัดจังหวัด) และออกด้านข้าง
+    const px = Math.round(r.w * 0.6), pu = Math.round(r.h * 2.8), pd = Math.round(r.h * 0.35);
+    const x0 = Math.max(1, r.x - px), y0 = Math.max(1, r.y - pu), x1 = Math.min(W - 1, r.x + r.w + px), y1 = Math.min(H - 1, r.y + r.h + pd);
+    const rw = x1 - x0, rh = y1 - y0; if (rw < 30 || rh < 12) return null;
+    const st = Math.max(1, Math.floor(rh / 70)), w = Math.floor(rw / st), h = Math.floor(rh / st), N = w * h;
+    const a = new Uint8Array(N), hist = new Uint32Array(256);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const v = g[(y0 + y * st) * W + x0 + x * st] | 0; a[y * w + x] = v; hist[v]++; }
+    let sumAll = 0; for (let i = 0; i < 256; i++) sumAll += i * hist[i];       // Otsu
+    let wB = 0, sumB = 0, bestVar = -1, t = 128;
+    for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = N - wB; if (!wF) break; sumB += i * hist[i]; const mB = sumB / wB, mF = (sumAll - sumB) / wF, v = wB * wF * (mB - mF) * (mB - mF); if (v > bestVar) { bestVar = v; t = i; } }
+    const scan = (fgDark) => {
+      const m = new Uint8Array(N);
+      for (let i = 0; i < N; i++) m[i] = (fgDark ? a[i] <= t : a[i] > t) ? 1 : 0;
+      const seen = new Uint8Array(N), stack = new Int32Array(N), comps = [];
+      for (let s0 = 0; s0 < N; s0++) {
+        if (!m[s0] || seen[s0]) continue;
+        let sp = 0, n = 0, cx0 = w, cy0 = h, cx1 = 0, cy1 = 0; stack[sp++] = s0; seen[s0] = 1;
+        while (sp) {
+          const p = stack[--sp], py2 = (p / w) | 0, px2 = p - py2 * w; n++;
+          if (px2 < cx0) cx0 = px2; if (px2 > cx1) cx1 = px2; if (py2 < cy0) cy0 = py2; if (py2 > cy1) cy1 = py2;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            const nx = px2 + dx, ny = py2 + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const q = ny * w + nx; if (m[q] && !seen[q]) { seen[q] = 1; stack[sp++] = q; }
+          }
+        }
+        const bw = cx1 - cx0 + 1, bh = cy1 - cy0 + 1, fill = n / (bw * bh), ar = bw / bh;
+        if (bh >= 6 && n >= 10 && ar >= 0.08 && ar <= 1.3 && fill >= 0.15 && fill <= 0.97) comps.push({ x0: cx0, y0: cy0, x1: cx1, y1: cy1, bh, cy: (cy0 + cy1) / 2 });
+      }
+      if (comps.length < 3) return null;
+      let grp = null;                                                // กลุ่มสูงเท่ากัน+แถวเดียวกัน ≥3 ตัว · เลือกกลุ่ม "ตัวสูงสุด" (แถวทะเบียนใหญ่กว่าบรรทัดจังหวัด)
+      for (const c of comps) {
+        const gset = comps.filter((d) => Math.abs(d.bh - c.bh) <= 0.3 * c.bh && Math.abs(d.cy - c.cy) <= 0.4 * c.bh);
+        if (gset.length < 3 || gset.length > 12) continue;
+        const span = Math.max(...gset.map((d) => d.x1)) - Math.min(...gset.map((d) => d.x0)); if (span < 1.8 * c.bh || span > 14 * c.bh) continue;
+        if (!grp || c.bh > grp.bh * 1.15 || (c.bh >= grp.bh * 0.87 && gset.length > grp.list.length)) grp = { list: gset, bh: c.bh };
+      }
+      if (!grp) return null; grp = grp.list;
+      // ดึงตัวอักษรไทยที่สูง/ต่ำต่างจากตัวเลขเล็กน้อย แต่อยู่แถวเดียวกันและติดกลุ่ม (ไม่ดึงบรรทัดจังหวัด: คนละแถว/เล็กกว่ามาก)
+      const bh0 = Math.max(...grp.map((d) => d.bh)); let grew = true;
+      for (let it = 0; grew && it < 4; it++) { grew = false;
+        const gx0 = Math.min(...grp.map((d) => d.x0)), gx1 = Math.max(...grp.map((d) => d.x1));
+        for (const d of comps) { if (grp.includes(d)) continue;
+          if (d.bh >= 0.55 * bh0 && d.bh <= 1.5 * bh0 && Math.abs(d.cy - grp[0].cy) <= 0.5 * bh0 && (d.x1 >= gx0 - 2.2 * bh0 && d.x0 <= gx1 + 2.2 * bh0)) { grp.push(d); grew = true; } } }
+      if (grp.length > 12) return null;
+      grp.sort((p, q) => p.x0 - q.x0);
+      const mg = [];                                                 // รวมชิ้นส่วนของตัวอักษรเดียวกันที่แยกกัน (ซ้อนกันแนวนอน)
+      for (const c of grp) {
+        const l = mg[mg.length - 1];
+        if (l && Math.min(l.x1, c.x1) - Math.max(l.x0, c.x0) > 0.5 * Math.min(l.x1 - l.x0 + 1, c.x1 - c.x0 + 1)) { l.x0 = Math.min(l.x0, c.x0); l.x1 = Math.max(l.x1, c.x1); l.y0 = Math.min(l.y0, c.y0); l.y1 = Math.max(l.y1, c.y1); } else mg.push({ ...c });
+      }
+      if (mg.length < 3 || mg.length > 9) return null;
+      return { mg, bh: bh0 };
+    };
+    // ไม่รู้ว่าตัวอักษรเข้มบนพื้นสว่าง หรือกลับกัน (พื้นหลังรอบป้ายทำให้ Otsu สลับขั้ว) → ลองทั้งสองขั้ว เลือกแถวที่ตัวสูงกว่า/ครบ 4–8 ตัว
+    const ra = scan(true), rb = scan(false);
+    const okN = (q) => q && q.mg.length >= 4 && q.mg.length <= 8;
+    const res = (okN(ra) && !okN(rb)) ? ra : (okN(rb) && !okN(ra)) ? rb : (ra && rb) ? (rb.bh > ra.bh * 1.15 ? rb : ra) : (ra || rb);
+    if (!res) return null; const mg = res.mg;
+    const list = mg.map((c) => ({ x: x0 + c.x0 * st, y: y0 + c.y0 * st, w: (c.x1 - c.x0 + 1) * st, h: (c.y1 - c.y0 + 1) * st }));
+    let ux0 = Infinity, uy0 = Infinity, ux1 = 0, uy1 = 0, mh = 0;
+    for (const q of list) { ux0 = Math.min(ux0, q.x); uy0 = Math.min(uy0, q.y); ux1 = Math.max(ux1, q.x + q.w); uy1 = Math.max(uy1, q.y + q.h); mh = Math.max(mh, q.h); }
+    const padX = Math.round(mh * 0.35), padY = Math.round(mh * 0.25), bx = Math.max(0, ux0 - padX), by = Math.max(0, uy0 - padY);
+    return { x: bx, y: by, w: Math.min(W, ux1 + padX) - bx, h: Math.min(H, uy1 + padY) - by, list };
+  }
+  function detectFull(g, W, H, opt) {
+    const r = detect(g, W, H, opt); if (!r) return null;
+    const f = glyphs(g, W, H, r); if (!f) return r;
+    return { x: f.x, y: f.y, w: f.w, h: f.h, score: r.score, glyphs: f.list };
+  }
+  root.DSPlate = { detect, detectFull, glyphs, sharpness };
   if (typeof module !== "undefined") module.exports = root.DSPlate;
 })(typeof window !== "undefined" ? window : globalThis);
