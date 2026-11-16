@@ -171,6 +171,18 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ imageBase64: encodeBase64(bytes), mediaType: "image/jpeg" }),
       });
       ocr = await ocrRes.json().catch(() => ({}));
+      // เครื่องอ่านหลักให้ผลที่พอเชื่อถือได้ (≥50% และรูปแบบทะเบียนถูก) → ใช้เทียบกับ Gemini: เลขไม่ตรง = ไม่บันทึกอัตโนมัติ ส่งให้คนตรวจ · ตัวอักษรต่างอย่างเดียว = บันทึกตาม Gemini แต่จดหมายเหตุไว้
+      if (ocrRes.ok && ocr.found && ocr.plate && weak?.plate && Number(weak.confidence ?? 0) >= 0.5 && weak.standard_format !== false) {
+        const dg = (x: unknown) => String(x).replace(/\D/g, ""), nk = (x: unknown) => String(x).replace(/[\s\-]/g, "");
+        if (dg(ocr.plate) !== dg(weak.plate)) { ocr.needs_review = true; engNote += ` · เลขไม่ตรงกัน: Gemini ${ocr.plate} / เครื่องอ่านหลัก ${weak.plate}`; }
+        else if (nk(ocr.plate) !== nk(weak.plate)) engNote += ` · ตัวอักษรต่างจากเครื่องอ่านหลัก (${weak.plate})`;
+      }
+      // Gemini ใช้ไม่ได้ (โควตา/หมดเวลา) แต่เครื่องอ่านหลักมีผลที่พอเดาได้ → เสนอผลนั้นให้คนยืนยัน แทนที่จะทิ้งเป็น "รอตรวจทะเบียน" ว่างๆ
+      if (!ocrRes.ok && weak?.plate) {
+        ocrRes = { ok: true } as Response;
+        ocr = { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: weak.decided_by === "ai" ? aiProv(weak) : "tesseract", color: weak.vehicle_color ?? null };
+        engNote += " · AI สำรองใช้ไม่ได้ ใช้ผลเครื่องอ่านหลักเป็นข้อเสนอ";
+      }
     } else if (!ocrOk) {
       ocrRes = { ok: true } as Response;
       ocr = weak ? { found: true, plate: weak.plate, province: null, vehicle_type: null, confidence: Number(weak.confidence ?? 0), needs_review: true, provider: weak.decided_by === "ai" ? aiProv(weak) : "tesseract", color: weak.vehicle_color ?? null } : { found: false };
