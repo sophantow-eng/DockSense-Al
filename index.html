@@ -397,7 +397,7 @@ async function phoneCam() {
     <label>ชื่อกล้อง</label><input id="pcName" value="${esc(defName)}" maxlength="30">
     <div class="camwrap fit" style="margin-top:10px"><video id="pcV" muted playsinline autoplay></video><div class="camload" id="pcW">กด “เริ่มส่งภาพสด”</div><div id="pcScan" class="scanline" style="display:none"></div><div id="pcChip" style="position:absolute;left:8px;right:8px;bottom:8px;padding:8px 12px;border-radius:10px;background:rgba(8,16,32,.82);color:#fff;font-size:.92rem;line-height:1.35;pointer-events:none;display:none"></div><div id="pcGly" style="position:absolute;inset:0;pointer-events:none;display:none"></div><div id="pcBox" class="lockbox" style="position:absolute;display:none;border:3px solid #22c55e;border-radius:6px;pointer-events:none;box-shadow:0 0 0 2px rgba(0,0,0,.4)"></div></div>
     <p class="muted" id="pcInfo" style="margin:8px 0 0"></p>
-    <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="pcAuto" checked style="width:auto;min-height:0"> ถ่ายทะเบียนอัตโนมัติเมื่อเห็นป้ายเข้าใกล้และนิ่ง (ตรวจในเครื่อง ไม่เสียโควตา AI — เรียก AI เมื่อป้ายชัดแล้วเท่านั้น)</label><p class="muted" id="pcAuto2" style="margin:4px 0 0"></p>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:10px"><input type="checkbox" id="pcAuto" checked style="width:auto;min-height:0"> ถ่ายทะเบียนอัตโนมัติเมื่อเห็นป้ายเข้าใกล้และนิ่ง (ตรวจในเครื่อง ไม่เสียโควตา AI — เรียก AI เมื่อป้ายชัดแล้วเท่านั้น)</label><p class="muted" id="pcAuto2" style="margin:4px 0 0"></p><div id="pcLog" style="display:grid;gap:8px;margin-top:10px"></div>
     <div class="actbar"><button id="pcGo" type="button">เริ่มส่งภาพสด</button><button class="ghost" id="pcNow" type="button">อ่านทะเบียนตอนนี้</button><button class="ghost" id="pcFlip" type="button">สลับกล้อง</button><button class="ghost" id="pcX" type="button">ปิด</button></div>`);
   const q = (s) => m.querySelector(s);
   let stream = null, facing = "environment", ch = null, lobby = null, timer = null, viewers = 0, running = false, busy = false, wl = null, beatT = null, autoT = null, offLv = null, sent = 0, t0 = Date.now();
@@ -513,24 +513,51 @@ async function phoneCam() {
       return { ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) };
     };
     const sayF = (t) => say(t, true);
-    const doOcr = async (blob, auto) => {
-      let miss = false; ocrBusy = true; lastOcr = Date.now(); sayF("กำลังอ่านทะเบียน…");
+    // ---- ถ่ายก่อน → ตรวจ/บันทึกเบื้องหลัง: โชว์รูปที่ถ่ายทันที กล้องไม่ต้องรอผล พร้อมถ่ายคันต่อไปได้เลย (ส่งทีละภาพตามคิว) ----
+    const COL = { wait: "#3b82f6", ok: "#22c55e", review: "#f59e0b", none: "#94a3b8", err: "#ef4444" };
+    const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const mkCard = (url) => {
+      const log = q("#pcLog"); if (!log) return () => {};
+      const el = document.createElement("div"); el.style.cssText = "display:flex;gap:10px;align-items:center;padding:8px;border-radius:12px;border:2px solid " + COL.wait + ";background:rgba(15,23,42,.55)";
+      const im = document.createElement("img"); im.src = url; im.alt = "ภาพที่ถ่าย"; im.style.cssText = "width:112px;height:64px;object-fit:cover;border-radius:8px;flex:none;background:#000";
+      const tx = document.createElement("div"); tx.style.cssText = "min-width:0;line-height:1.3"; el.append(im, tx); log.prepend(el);
+      while (log.children.length > 5) { const o = log.lastChild, i2 = o.querySelector("img"); if (i2) URL.revokeObjectURL(i2.src); o.remove(); }
+      return (kind, title, plate) => {
+        el.style.borderColor = COL[kind]; tx.replaceChildren();
+        const a1 = document.createElement("div"); a1.style.cssText = "font-weight:700;color:" + COL[kind]; a1.textContent = title; tx.appendChild(a1);
+        if (plate) { const b1 = document.createElement("div"); b1.style.cssText = "font-size:1.3rem;font-weight:800;letter-spacing:.5px"; b1.textContent = plate; tx.appendChild(b1); }
+      };
+    };
+    const jobs = []; let pumping = false;
+    const runJob = async (jb) => {
+      let miss = false; jb.set("wait", "กำลังตรวจและบันทึก…");
       try {
-        if (!blob) { const c = grab(1280); blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85)); }
-        const { ok, status, j } = await send(blob, auto); testWarn = ok && j.skipped === "testing_mode";
-        miss = !ok || (!j.pending && !j.duplicate && !j.plate && !j.pending_review && j.status !== "needs_review"); // ไม่ได้บันทึกอะไร → พร้อมลองใหม่เอง
-        if (!ok) sayF("อ่านทะเบียนไม่สำเร็จ: " + (j.error || status));
-        else if (j.pending) { savedN++; sayF(j.code === "NO_PLATE_READ" ? "เห็นรถแต่อ่านทะเบียนไม่ออก — เก็บภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์แล้ว" : "AI อ่านไม่ได้ตอนนี้ — ส่งภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์ทะเบียนแล้ว"); }
-        else if (j.skipped === "cooldown") sayF("รอสักครู่… (กันอ่านถี่เกินไป)");
-        else if (j.skipped === "testing_mode") sayF("⚠ ระบบอยู่ในโหมดทดสอบ จึงไม่บันทึก — ไปที่แท็บ AI แล้วสลับเป็น “ใช้งานจริง”");
-        else if (j.skipped) sayF("ภาพไม่พร้อม (" + j.skipped + ") — รอเฟรมถัดไป");
-        else if (j.duplicate) sayF("เห็น " + j.plate + " (บันทึกไปแล้วเมื่อสักครู่)");
-        else if (j.plate) { savedN++; sayF("✓ บันทึกแล้ว: " + j.plate + (j.status === "needs_review" ? " (รอตรวจสอบ)" : "")); }
-        else if (j.pending_review || j.status === "needs_review") { savedN++; sayF("✓ บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
-        else sayF("ยังไม่พบป้ายทะเบียนในภาพ");
-      } catch (e) { miss = true; sayF("อ่านทะเบียนไม่สำเร็จ"); }
-      ocrBusy = false;
-      if (miss) { armed = true; mo.occ = false; stable = 0; last = null; } // อ่านพลาด/ภาพไม่พร้อม: ไม่ค้างรอ "รถออก" แต่ลองใหม่เมื่อเห็นรถ/ป้ายอีก
+        const { ok, status, j } = await send(jb.blob, jb.auto); testWarn = ok && j.skipped === "testing_mode";
+        if (!ok) { miss = true; jb.set("err", "ส่งไม่สำเร็จ: " + (j.error || status)); sayF("ส่งไม่สำเร็จ: " + (j.error || status)); }
+        else if (j.skipped === "cooldown" && jb.tries < 2) { jb.tries++; jb.set("wait", "รอคิวบันทึก… (ระบบกันยิงถี่ จะลองใหม่เอง)"); await sleep(11000); jobs.unshift(jb); return; }
+        else if (j.pending) { savedN++; jb.set("review", j.code === "NO_PLATE_READ" ? "เห็นรถแต่อ่านทะเบียนไม่ออก — ส่งเข้า “รอตรวจสอบ” แล้ว" : "AI อ่านไม่ได้ตอนนี้ — ส่งเข้า “รอตรวจสอบ” แล้ว"); sayF("เก็บภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
+        else if (j.skipped === "testing_mode") { jb.set("err", "ระบบอยู่ในโหมดทดสอบ จึงไม่บันทึก"); sayF("⚠ ระบบอยู่ในโหมดทดสอบ จึงไม่บันทึก — ไปที่แท็บ AI แล้วสลับเป็น “ใช้งานจริง”"); }
+        else if (j.skipped === "cooldown") jb.set("none", "ข้าม: ถี่เกินไป (น่าจะคันเดิม)");
+        else if (j.skipped) { miss = true; jb.set("none", "ภาพไม่พร้อม (" + j.skipped + ") — จะลองใหม่"); }
+        else if (j.duplicate) { jb.set("none", "เห็นทะเบียนนี้ — เคยบันทึกไว้แล้วเมื่อสักครู่ (ไม่บันทึกซ้ำ)", j.plate); sayF("เห็น " + j.plate + " (บันทึกไปแล้วเมื่อสักครู่)"); }
+        else if (j.plate) {
+          savedN++; const rv = j.status === "needs_review";
+          jb.set(rv ? "review" : "ok", rv ? "บันทึกแล้ว — รอพนักงานตรวจ" : "✓ บันทึกทะเบียนแล้ว", j.plate); sayF("✓ บันทึกแล้ว: " + j.plate + (rv ? " (รอตรวจสอบ)" : ""));
+          try { navigator.vibrate && navigator.vibrate(rv ? 60 : [60, 40, 60]); } catch (_e) { /* ไม่รองรับก็ข้าม */ }
+        }
+        else if (j.pending_review || j.status === "needs_review") { savedN++; jb.set("review", "บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); sayF("✓ บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
+        else { miss = true; jb.set("none", "ยังไม่พบป้ายทะเบียนในภาพ"); sayF("ยังไม่พบป้ายทะเบียนในภาพ"); }
+      } catch (e) { miss = true; jb.set("err", "ส่งไม่สำเร็จ (สัญญาณ?)"); sayF("อ่านทะเบียนไม่สำเร็จ"); }
+      if (miss) { armed = true; mo.occ = false; stable = 0; last = null; } // พลาด/ภาพไม่พร้อม: ลองใหม่เมื่อเห็นรถ/ป้ายอีก
+    };
+    const pump = async () => { if (pumping) return; pumping = true; try { while (jobs.length) await runJob(jobs.shift()); } finally { pumping = false; } };
+    const doOcr = async (blob, auto) => {
+      lastOcr = Date.now();
+      try { if (!blob) { const c = grab(1280); blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85)); } } catch (_e) { blob = null; }
+      if (!blob) return;
+      if (jobs.length >= 4) { sayF("คิวเต็ม — รอให้บันทึกคันก่อนหน้าเสร็จ"); return; }
+      const set = mkCard(URL.createObjectURL(blob)); set("wait", "📸 ถ่ายแล้ว — รอตรวจและบันทึก…"); sayF("📸 ถ่ายแล้ว — กำลังตรวจและบันทึก…");
+      jobs.push({ blob, auto, set, tries: 0 }); pump();
     };
     q("#pcNow").onclick = async () => {
       if (!running || ocrBusy) return; ocrBusy = true; say("ปรับโฟกัสและแสง แล้วเลือกเฟรมที่คมที่สุด…"); await nudgeFocus(); await new Promise((ok) => setTimeout(ok, 900));
@@ -613,7 +640,7 @@ async function phoneCam() {
       const mv = last ? Math.hypot(r.x + r.w / 2 - last.x - last.w / 2, r.y + r.h / 2 - last.y - last.h / 2) / W : 1, gr = last ? Math.abs(r.w - last.w) / last.w : 1;
       last = r; stable = (mv < 0.03 && gr < 0.15) ? stable + 1 : 0;
       if (stable < 2) { say("ป้ายเข้ากรอบแล้ว รอให้นิ่ง…"); return; }
-      if (Date.now() - lastOcr < 12000) { say("รอสักครู่… (กันอ่านถี่เกินไป)"); return; }
+      if (Date.now() - lastOcr < 4000) { say("รอสักครู่… (กันอ่านถี่เกินไป)"); return; }
       // นิ่งแล้ว: เก็บ 3 เฟรมห่างกัน ~150 ms เลือกเฟรมที่คมที่สุด (หลบเฟรมเบลอ) ก่อนส่งให้ AI 1 ครั้ง
       grabbing = true; say("ป้ายนิ่งแล้ว กำลังเลือกเฟรมที่คมที่สุด…");
       let bestS = -1, bestR = r, bestBlob = null;
