@@ -509,10 +509,11 @@ async function phoneCam() {
     };
     const sayF = (t) => say(t, true);
     const doOcr = async (blob, auto) => {
-      ocrBusy = true; lastOcr = Date.now(); sayF("กำลังอ่านทะเบียน…");
+      let miss = false; ocrBusy = true; lastOcr = Date.now(); sayF("กำลังอ่านทะเบียน…");
       try {
         if (!blob) { const c = grab(1280); blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85)); }
         const { ok, status, j } = await send(blob, auto); testWarn = ok && j.skipped === "testing_mode";
+        miss = !ok || (!j.pending && !j.duplicate && !j.plate && !j.pending_review && j.status !== "needs_review"); // ไม่ได้บันทึกอะไร → พร้อมลองใหม่เอง
         if (!ok) sayF("อ่านทะเบียนไม่สำเร็จ: " + (j.error || status));
         else if (j.pending) { savedN++; sayF(j.code === "NO_PLATE_READ" ? "เห็นรถแต่อ่านทะเบียนไม่ออก — เก็บภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์แล้ว" : "AI อ่านไม่ได้ตอนนี้ — ส่งภาพเข้าหน้า “รอตรวจสอบ” ให้พนักงานพิมพ์ทะเบียนแล้ว"); }
         else if (j.skipped === "cooldown") sayF("รอสักครู่… (กันอ่านถี่เกินไป)");
@@ -522,8 +523,9 @@ async function phoneCam() {
         else if (j.plate) { savedN++; sayF("✓ บันทึกแล้ว: " + j.plate + (j.status === "needs_review" ? " (รอตรวจสอบ)" : "")); }
         else if (j.pending_review || j.status === "needs_review") { savedN++; sayF("✓ บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
         else sayF("ยังไม่พบป้ายทะเบียนในภาพ");
-      } catch (e) { sayF("อ่านทะเบียนไม่สำเร็จ"); }
+      } catch (e) { miss = true; sayF("อ่านทะเบียนไม่สำเร็จ"); }
       ocrBusy = false;
+      if (miss) { armed = true; mo.occ = false; stable = 0; last = null; } // อ่านพลาด/ภาพไม่พร้อม: ไม่ค้างรอ "รถออก" แต่ลองใหม่เมื่อเห็นรถ/ป้ายอีก
     };
     q("#pcNow").onclick = async () => {
       if (!running || ocrBusy) return; ocrBusy = true; say("ปรับโฟกัสและแสง แล้วเลือกเฟรมที่คมที่สุด…"); await nudgeFocus(); await new Promise((ok) => setTimeout(ok, 900));
@@ -531,11 +533,11 @@ async function phoneCam() {
       for (let n = 0; n < 3; n++) { const f = grayOf(q("#pcV")), s = window.DSPlate.sharpness(f.g, f.W, f.H, 0, 0, f.W, f.H); if (s > bs) { bs = s; const c = grab(1280); best = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.9)); } await new Promise((ok) => setTimeout(ok, 140)); }
       ocrBusy = false; armed = false; doOcr(best);
     };
-    let armed = true, stable = 0, last = null, goneAt = 0, grabbing = false, trk = null, seenAt = 0, blurN = 0, frameQ = null, blurTry = 0;
+    let armed = true, stable = 0, last = null, goneAt = 0, grabbing = false, trk = null, seenAt = 0, blurN = 0, frameQ = null, blurTry = 0, shotBox = null;
     // ---- ตรวจ "รถเข้า → นิ่ง → ถ่าย → รถออก" จากการเปลี่ยนของภาพ (ไม่ต้องเห็นป้ายชัดก่อน) ----
     // จำภาพพื้นหลังว่างตอนเริ่ม · ภาพต่างจากพื้นหลังและนิ่ง = มีรถ → ถ่าย 1 ครั้ง · ภาพกลับเป็นพื้นหลัง = รถออก → พร้อมคันต่อไป
     // ถ่ายแล้วอ่านไม่ออกจะไม่สร้างรายการขยะ (กันกรณีคนเดินผ่าน) — ต่างจากโหมดเห็นป้ายชัดที่เก็บภาพไว้ให้คนตรวจ
-    const mo = { prev: null, empty: null, shot: null, calm: 0, occ: false, lastShot: 0, burst: false };
+    const mo = { prev: null, empty: null, shot: null, calm: 0, occ: false, lastShot: 0, burst: false, tries: 0 };
     const tiny = (g, W, H) => { const GX = 48, GY = 36, o = new Float32Array(GX * GY), c = new Uint16Array(GX * GY); for (let y = 0; y < H; y += 2) { const gy = Math.min(GY - 1, (y * GY / H) | 0); for (let x = 0; x < W; x += 2) { const k = gy * GX + Math.min(GX - 1, (x * GX / W) | 0); o[k] += g[y * W + x]; c[k]++; } } for (let i = 0; i < o.length; i++) o[i] /= c[i] || 1; return o; };
     const dif = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) t += Math.abs(a[i] - b[i]); return t / a.length; };
     const motionStep = (g, W, H) => {
@@ -545,14 +547,16 @@ async function phoneCam() {
       const dE = dif(cur, mo.empty);
       if (!mo.occ) {
         if (mo.calm >= 6 && dE < 5) for (let i = 0; i < cur.length; i++) mo.empty[i] += (cur[i] - mo.empty[i]) * 0.2; // ปรับตามแสงที่ค่อยๆ เปลี่ยน
+        if (dE < 5) mo.tries = 0;
         if (dE > 9) {
           if (mo.calm < 3) { say("พบการเคลื่อนไหว — รอให้รถนิ่ง…"); return false; }
           if (now - mo.lastShot < 5000) return false;
-          mo.occ = true; mo.shot = cur; mo.lastShot = now; mo.burst = false; return true;
+          if (mo.tries >= 3) { say("ลองอ่านคันนี้ 3 ครั้งแล้วไม่สำเร็จ — รอให้รถออกกรอบ"); return false; }
+          mo.tries++; mo.occ = true; mo.shot = cur; mo.lastShot = now; mo.burst = false; return true;
         }
         say("พร้อม: รอรถเข้ากรอบ"); return false;
       }
-      if (dE < 5 && mo.calm >= 3) { mo.occ = false; mo.shot = null; mo.burst = false; say("รถออกแล้ว — รอคันต่อไป"); return false; }
+      if (dE < 5 && mo.calm >= 3) { mo.occ = false; mo.shot = null; mo.burst = false; mo.tries = 0; say("รถออกแล้ว — รอคันต่อไป"); return false; }
       if (mo.calm >= 3 && mo.burst && mo.shot && dif(cur, mo.shot) > 16 && now - mo.lastShot > 5000) { mo.shot = cur; mo.lastShot = now; mo.burst = false; return true; } // คันใหม่ต่อท้ายทันที ไม่ทันเห็นกรอบว่าง
       return false;
     };
@@ -593,7 +597,13 @@ async function phoneCam() {
       goneAt = 0; sc(false);
       const r = r0, big = r.w / W >= 0.12;
       box(trk, W, H, big && (stable >= 1 || !armed));
-      if (!armed) { say("อ่านคันนี้ไปแล้ว — รอให้รถออกจากกรอบ"); return; }
+      if (!armed) {
+        // ป้ายใหม่ (ตำแหน่ง/ขนาดต่างจากที่เพิ่งถ่าย) หรือผ่านไป 45 วิ → พร้อมถ่ายใหม่เองโดยไม่ต้องรอกรอบว่าง (ถ้าทะเบียนซ้ำ ระบบหลังบ้านกันซ้ำให้)
+        const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+        const moved = shotBox && (Math.hypot(cx - shotBox.cx, cy - shotBox.cy) / W > 0.2 || Math.abs(r.w - shotBox.w) / shotBox.w > 0.4);
+        if (moved || Date.now() - lastOcr > 45000) { armed = true; stable = 0; last = null; }
+        else { say("อ่านคันนี้ไปแล้ว — รอรถคันต่อไป"); return; }
+      }
       if (!big) { stable = 0; last = null; say("พบป้ายคล้ายทะเบียน — ยังไกลอยู่ รอให้เข้ามาใกล้อีก"); return; }
       const mv = last ? Math.hypot(r.x + r.w / 2 - last.x - last.w / 2, r.y + r.h / 2 - last.y - last.h / 2) / W : 1, gr = last ? Math.abs(r.w - last.w) / last.w : 1;
       last = r; stable = (mv < 0.03 && gr < 0.15) ? stable + 1 : 0;
@@ -609,6 +619,7 @@ async function phoneCam() {
       }
       grabbing = false; armed = false; stable = 0; last = null;
       if (bestS < 40 && ++blurTry < 3) { say("ภาพยังเบลอ/มืดไปหน่อย — รอเฟรมที่ชัดกว่า (ลองถือให้นิ่งหรือเพิ่มแสง)"); armed = true; return; }
+      shotBox = { cx: bestR.x + bestR.w / 2, cy: bestR.y + bestR.h / 2, w: bestR.w };
       blurTry = 0; // เบลอซ้ำ 3 รอบ: ส่งเฟรมที่ดีที่สุดไปเลย (ระบบจะไม่บันทึกทะเบียนที่ไม่แน่ใจ แต่เก็บภาพไว้ให้พนักงานตรวจ ไม่ให้รถหลุด)
       doOcr(bestBlob, true);
     } });
