@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
           // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
           // internal_agree = EasyOCR กับ YOLO (สองโมเดลอิสระบนคอมแรง) อ่านตรงกันเองและเป็นรูปแบบทะเบียนถูกต้อง → เชื่อถือได้โดยไม่ต้องรอความมั่นใจเกิน 85%
           if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || b.internal_agree === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
-            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? aiProv(b) : "tesseract", known: b.known_vehicle === true, color: b.vehicle_color ?? null };
+            ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? aiProv(b) : "tesseract", known: b.known_vehicle === true, trusted: b.internal_agree === true, color: b.vehicle_color ?? null };
             ocrOk = true; viaBackend = true; ocrRes = { ok: true } as Response;
           } else if (b.found && b.plate) { weak = b; backendWhy = "unverified"; } else backendWhy = "no_plate";
         }
@@ -225,7 +225,7 @@ Deno.serve(async (req) => {
 
     // 3) บันทึก
     let visitId: string | null = null, status: string, vehicleId: string | null = null;
-    if (ctl.auto_save && (conf >= high || ocr.known === true) && !ocr.needs_review) {
+    if (ctl.auto_save && (conf >= high || ocr.known === true || ocr.trusted === true) && !ocr.needs_review) {   // trusted = EasyOCR+YOLO ตรงกันเอง
       // ทะเบียนเก่า: ผูกกับรถที่ลงทะเบียนไว้ทันที (backend ไม่ส่งจังหวัด → ไม่ให้สร้างรถซ้ำ)
       let knownId: string | null = null, knownProv: string | null = ocr.province ?? null;
       if (viaBackend) {
