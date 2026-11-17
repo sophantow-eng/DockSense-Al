@@ -522,11 +522,23 @@ async function phoneCam() {
       const im = document.createElement("img"); im.src = url; im.alt = "ภาพที่ถ่าย"; im.style.cssText = "width:112px;height:64px;object-fit:cover;border-radius:8px;flex:none;background:#000";
       const tx = document.createElement("div"); tx.style.cssText = "min-width:0;line-height:1.3"; el.append(im, tx); log.prepend(el);
       while (log.children.length > 5) { const o = log.lastChild, i2 = o.querySelector("img"); if (i2) URL.revokeObjectURL(i2.src); o.remove(); }
-      return (kind, title, plate) => {
+      return (kind, title, plate, note) => {
         el.style.borderColor = COL[kind]; tx.replaceChildren();
         const a1 = document.createElement("div"); a1.style.cssText = "font-weight:700;color:" + COL[kind]; a1.textContent = title; tx.appendChild(a1);
         if (plate) { const b1 = document.createElement("div"); b1.style.cssText = "font-size:1.3rem;font-weight:800;letter-spacing:.5px"; b1.textContent = plate; tx.appendChild(b1); }
+        if (note) { const n1 = document.createElement("div"); n1.style.cssText = "font-size:.82rem;opacity:.8;margin-top:2px"; n1.textContent = note; tx.appendChild(n1); }
       };
+    };
+    // บอกว่าอ่านด้วยเครื่องไหน และถ้าไม่ใช่คอมแรง ให้บอกเหตุ (ออฟไลน์/ช้า/ไม่แน่ใจ) — ผู้ใช้จะรู้ว่าตอนนี้อยู่ในโหมดสำรอง
+    const readerNote = (j) => {
+      const e = j.engine || "", L = { "yolo+easyocr": "YOLO + EasyOCR (คอมแรง)", yolo: "YOLO (คอมแรง)", easyocr: "EasyOCR (คอมแรง)", tesseract: "Tesseract (เซิร์ฟเวอร์ — สำรอง)", gemini: "Gemini (สำรอง)" };
+      if (!e) return ""; let t = "อ่านโดย " + (L[e] || e);
+      if (e === "gemini" || e === "tesseract") {
+        if (j.backend === "timeout") t += " · เซิร์ฟเวอร์/คอมแรงตอบช้าเกินเวลา";
+        else if (["UNAVAILABLE", "ERROR", "NOT_CONFIGURED"].includes(j.ai)) t += " · คอมแรงไม่ได้ตอบ (ปิดอยู่/หลับ?)";
+        else if (j.backend === "unverified") t += " · คอมแรงยังไม่แน่ใจ";
+      }
+      return t;
     };
     const jobs = []; let pumping = false;
     const runJob = async (jb) => {
@@ -542,7 +554,7 @@ async function phoneCam() {
         else if (j.duplicate) { jb.set("none", "เห็นทะเบียนนี้ — เคยบันทึกไว้แล้วเมื่อสักครู่ (ไม่บันทึกซ้ำ)", j.plate); sayF("เห็น " + j.plate + " (บันทึกไปแล้วเมื่อสักครู่)"); }
         else if (j.plate) {
           savedN++; const rv = j.status === "needs_review";
-          jb.set(rv ? "review" : "ok", rv ? "บันทึกแล้ว — รอพนักงานตรวจ" : "✓ บันทึกทะเบียนแล้ว", j.plate); sayF("✓ บันทึกแล้ว: " + j.plate + (rv ? " (รอตรวจสอบ)" : ""));
+          jb.set(rv ? "review" : "ok", rv ? "บันทึกแล้ว — รอพนักงานตรวจ" : "✓ บันทึกทะเบียนแล้ว", j.plate, readerNote(j)); sayF("✓ บันทึกแล้ว: " + j.plate + (rv ? " (รอตรวจสอบ)" : ""));
           try { navigator.vibrate && navigator.vibrate(rv ? 60 : [60, 40, 60]); } catch (_e) { /* ไม่รองรับก็ข้าม */ }
         }
         else if (j.pending_review || j.status === "needs_review") { savedN++; jb.set("review", "บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); sayF("✓ บันทึกภาพแล้ว — รอพนักงานตรวจทะเบียน"); }
@@ -810,6 +822,7 @@ function occRender() {
   }).join("");
   el.innerHTML = `<div class="card"><h3>ศูนย์ควบคุมการอ่านทะเบียน</h3>
   ${occSt && occSt.err ? `<p class="muted wrapsafe">อ่านสถานะเครื่องยนต์ไม่ได้: ${esc(occSt.err)}</p>` : ""}
+  ${occSt && occSt.worker ? (occSt.worker.online ? `<p class="badge ok" style="display:block;margin:6px 0">🟢 คอมแรง (EasyOCR + YOLO) ออนไลน์ — อ่านแม่นที่สุด</p>` : `<p class="badge" style="display:block;margin:6px 0;white-space:normal">🟠 คอมแรงออฟไลน์${occSt.worker.secs == null ? "" : " (ไม่เห็นมา " + (occSt.worker.secs > 3600 ? Math.round(occSt.worker.secs / 3600) + " ชม." : Math.max(1, Math.round(occSt.worker.secs / 60)) + " นาที") + ")"} — ตอนนี้ใช้ Tesseract/Gemini สำรอง (แม่นน้อยกว่า) · เปิดคอมและให้ worker ทำงานเพื่อกลับสู่โหมดแม่นสุด</p>`) : ""}
   ${sw}
   <p class="muted" style="margin:8px 0 0">สวิตช์ถูกบังคับที่เซิร์ฟเวอร์ (ฟังก์ชันรับภาพตรวจค่านี้ทุกครั้ง) ไม่ใช่แค่ปุ่มในหน้านี้</p></div>
   <div class="card"><h3>ทดสอบเทียบเครื่องยนต์</h3>

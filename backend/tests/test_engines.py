@@ -61,3 +61,25 @@ def test_tesseract_runs_and_blank_image_is_not_verified():
     ok, buf = cv2.imencode(".jpg", img)
     r = rs.run_engine("tesseract", [buf.tobytes()])
     assert r["engine"] == "tesseract" and r["status"] != "VERIFIED" and "ms" in r
+
+
+def _strong(plate="1กฆ9151"):
+    return {**_res("ai", "VERIFIED", plate, 0.9), "internal_agree": True, "provider": "yolo+easyocr"}
+
+def test_strong_ai_pair_not_vetoed_by_weak_tesseract(calls):
+    log, t = calls; t["tesseract"] = _res("tesseract", "NEEDS_REVIEW", "1กม9157", 0.55); t["ai"] = _strong()
+    r = rs.process(IMG, ("tesseract", "ai"), True)
+    assert r["status"] == "VERIFIED" and r["plate_norm"] == "1กฆ9151" and "tesseract_dissent" in r["warnings"] and "engines_disagree" not in r["warnings"]
+
+def test_strong_ai_pair_not_vetoed_by_tesseract_garbage(calls):
+    log, t = calls; t["tesseract"] = _res("tesseract", "REJECTED", "ชลบร", 0.2); t["ai"] = _strong()
+    assert rs.process(IMG, ("tesseract", "ai"), True)["status"] == "VERIFIED"
+
+def test_tesseract_verified_with_different_plate_still_goes_to_review(calls):
+    log, t = calls; t["tesseract"] = _res("tesseract", "VERIFIED", "2ขง5738", 0.95); t["ai"] = _strong()
+    r = rs.process(IMG, ("tesseract", "ai"), True)
+    assert r["status"] == "NEEDS_REVIEW" and r["conflict"]
+
+def test_single_easyocr_without_yolo_agreement_is_still_vetoed(calls):
+    log, t = calls; t["tesseract"] = _res("tesseract", "NEEDS_REVIEW", "1กม9157", 0.55); t["ai"] = _res("ai", "VERIFIED", "1กฆ9151", 0.9)
+    assert rs.process(IMG, ("tesseract", "ai"), True)["status"] == "NEEDS_REVIEW"

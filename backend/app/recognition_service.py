@@ -251,6 +251,12 @@ def _final(results: dict) -> dict:
     if not found:
         return {"found": False, "status": "FAILED", "plate": None, "confidence": 0.0, "needs_review": False, "decided_by": None}
     plates = {_norm(r) for r in found}
+    # สองโมเดลอิสระบนคอมแรง (EasyOCR + YOLO) อ่านตรงกันเองแล้ว = ผลที่แข็งที่สุดของระบบ (วัดจริง 26/28, ผ่านแล้วผิด 0)
+    # Tesseract บนเซิร์ฟเวอร์อ่านไทยได้แย่ (วัดจริง 4–25%) → ให้อ่านไม่ตรงอย่างเดียวมา "คัดค้าน" ไม่ได้ (เดิมทำให้เกือบทุกคันตกไปให้ Gemini)
+    # ยกเว้น Tesseract เองได้ VERIFIED และเป็นรูปแบบทะเบียนถูกต้องแต่คนละเลข = ผิดปกติจริง → ส่งคนตรวจ
+    if ok(a) and a.get("internal_agree") and t and t.get("plate") and _norm(t) != _norm(a):
+        if not (ok(t) and pu.is_standard(_norm(t))):
+            return {**a, "decided_by": "ai", "tesseract_dissent": _norm(t)}
     if len(found) == 2 and len(plates) == 1:  # ตรงกัน
         best = max(found, key=lambda r: r.get("confidence", 0))
         passed = ok(t) or ok(a)
@@ -314,6 +320,7 @@ def process(images: list[bytes], engines=("tesseract",), fallback: bool = True) 
     if final.get("agree"): w.append("engines_agree")
     if final.get("ai_no_confirm"): w.append("ai_no_confirm")
     if final.get("tess_no_confirm"): w.append("tess_no_confirm")
+    if final.get("tesseract_dissent"): w.append("tesseract_dissent")
     final["warnings"] = w
     final.update(_color(images))
     return final

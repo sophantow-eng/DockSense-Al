@@ -64,7 +64,10 @@ Deno.serve(async (req) => {
       }
       const ai = (await fetch(`${url}/functions/v1/ocr-plate`, { method: "POST", headers: { Authorization: `Bearer ${svc}`, apikey: svc, "Content-Type": "application/json" }, body: JSON.stringify({ ping: true }) })
         .then((r) => r.json()).catch(() => ({ error: "x" })));
-      return json({ tesseract: tess, ai: ai.ok ? { state: "READY", provider: ai.provider } : { state: "NOT_CONFIGURED" }, ctl });
+      // คอมแรง (EasyOCR+YOLO) ติดต่อคิวล่าสุดเมื่อไร — ออนไลน์ = ติดต่อภายใน 60 วินาที
+      const { data: wk } = await sb.from("ai_queue_keys").select("last_seen").eq("role", "worker").maybeSingle();
+      const wsec = wk?.last_seen ? Math.round((Date.now() - new Date(wk.last_seen).getTime()) / 1000) : null;
+      return json({ tesseract: tess, ai: ai.ok ? { state: "READY", provider: ai.provider } : { state: "NOT_CONFIGURED" }, worker: { online: wsec !== null && wsec < 60, secs: wsec }, ctl });
     }
 
     const mode = String(body.mode || "compare");

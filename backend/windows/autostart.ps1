@@ -5,7 +5,9 @@
 #   stop      : powershell -ExecutionPolicy Bypass -File windows\autostart.ps1 stop
 #   start     : powershell -ExecutionPolicy Bypass -File windows\autostart.ps1 start
 #   status    : powershell -ExecutionPolicy Bypass -File windows\autostart.ps1 status
-param([Parameter(Mandatory = $true)][ValidateSet("install", "uninstall", "start", "stop", "status")][string]$Action)
+#   nosleep   : keep the laptop awake while plugged in (no sleep, lid close does nothing on AC) - the worker cannot answer while the PC sleeps
+#   restoresleep : put the sleep settings back (sleep after 30 min on AC, lid close = sleep)
+param([Parameter(Mandatory = $true)][ValidateSet("install", "uninstall", "start", "stop", "status", "nosleep", "restoresleep")][string]$Action)
 $ErrorActionPreference = "Stop"
 $TaskName = "DockSenseWorker"
 $Backend = Split-Path -Parent $PSScriptRoot
@@ -46,6 +48,20 @@ switch ($Action) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     Stop-Worker
     Write-Host "Worker stopped. It will start again at next login (use uninstall to prevent that)."
+  }
+  "nosleep" {
+    powercfg /change standby-timeout-ac 0
+    powercfg /change hibernate-timeout-ac 0
+    powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
+    powercfg /setactive SCHEME_CURRENT
+    Write-Host "Done: while plugged in, the PC will not sleep and closing the lid does nothing. On battery nothing changed."
+    Write-Host "Undo with: autostart.ps1 restoresleep"
+  }
+  "restoresleep" {
+    powercfg /change standby-timeout-ac 30
+    powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1
+    powercfg /setactive SCHEME_CURRENT
+    Write-Host "Restored: sleep after 30 min on AC, lid close = sleep."
   }
   "status" {
     $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue

@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     let weak: any = null;
     let candRaw: string[] = [];
-    let engNote = "";
+    let engNote = "", backendWhy = "", backendAi = "";   // backendWhy: เหตุที่ไม่ได้ใช้ผล backend ตรง ๆ (timeout / http_xxx / unverified) — ส่งกลับให้หน้าเว็บบอกผู้ใช้
     // ผู้อ่านฝั่งคอมแรงบอกเองว่าใช้ตัวไหน (easyocr / yolo / yolo+easyocr) · ค่าแปลกปลอม = easyocr
     // deno-lint-ignore no-explicit-any
     const aiProv = (r: any) => { const p = String(r?.provider || r?.engines?.ai?.provider || ""); return ["yolo+easyocr", "yolo", "easyocr"].includes(p) ? p : "easyocr"; };
@@ -149,19 +149,22 @@ Deno.serve(async (req) => {
     const tessReady = !!bUrl && !!bKey && !!bEngines;
     if (tessReady) {
       try {
-        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg", "x-ocr-engines": bEngines, "x-ocr-fallback": ctl.auto_fallback ? "1" : "0" }, body: bytes, signal: AbortSignal.timeout(ctl.ai ? 15000 : 8000) });
+        const br = await fetch(`${bUrl}/api/v1/recognition/process`, { method: "POST", headers: { "x-api-key": bKey, "Content-Type": "image/jpeg", "x-ocr-engines": bEngines, "x-ocr-fallback": ctl.auto_fallback ? "1" : "0" }, body: bytes, signal: AbortSignal.timeout(ctl.ai ? 24000 : 8000) });   // เดิม 15 วิ ตัดทิ้งผลที่ใกล้เสร็จ (backend วัดจริง 4–18 วิ) แล้วโยนไป Gemini · ESP32 รอได้ 30 วิ
+        if (!br.ok) backendWhy = "http_" + br.status;
         if (br.ok) {
           const b = await br.json();
+          backendAi = String(b.engines?.ai?.status || "");   // UNAVAILABLE/ERROR = คอมแรงไม่ตอบ
           // deno-lint-ignore no-explicit-any
           candRaw = [...(Array.isArray(b.raw) ? b.raw : []), ...Object.values(b.engines || {}).flatMap((e: any) => (Array.isArray(e?.raw) ? e.raw : []))].map(String);
           if (Array.isArray(b.warnings) && b.warnings.includes("engines_disagree")) engNote = " · สองเครื่องอ่านไม่ตรงกัน";
           // รถเก่า (ตรงทะเบียนที่ลงไว้เป๊ะ) ผ่านที่ความมั่นใจต่ำกว่า · รถใหม่ต้องถึงเกณฑ์ปกติ
-          if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
+          // internal_agree = EasyOCR กับ YOLO (สองโมเดลอิสระบนคอมแรง) อ่านตรงกันเองและเป็นรูปแบบทะเบียนถูกต้อง → เชื่อถือได้โดยไม่ต้องรอความมั่นใจเกิน 85%
+          if (b.found && b.plate && b.status === "VERIFIED" && (b.known_vehicle === true || b.internal_agree === true || Number(b.confidence) >= Number(Deno.env.get("OCR_BACKEND_MIN") || 0.85))) {
             ocr = { found: true, plate: b.plate, province: null, vehicle_type: null, confidence: b.confidence, needs_review: false, provider: b.decided_by === "ai" ? aiProv(b) : "tesseract", known: b.known_vehicle === true, color: b.vehicle_color ?? null };
             ocrOk = true; viaBackend = true; ocrRes = { ok: true } as Response;
-          } else if (b.found && b.plate) weak = b;
+          } else if (b.found && b.plate) { weak = b; backendWhy = "unverified"; } else backendWhy = "no_plate";
         }
-      } catch (_) { /* backend/คอมเครื่องแรงหลับ-ปิด-ช้า */ }
+      } catch (_) { backendWhy = "timeout"; /* backend/คอมเครื่องแรงหลับ-ปิด-ช้า */ }
     }
     const aiAllowed = ctl.ai && (!ctl.tesseract || !tessReady || ctl.auto_fallback);  // Gemini = ที่พึ่งสุดท้าย
     if (!ocrOk && aiAllowed) {
@@ -175,7 +178,11 @@ Deno.serve(async (req) => {
       if (ocrRes.ok && ocr.found && ocr.plate && weak?.plate && Number(weak.confidence ?? 0) >= 0.5 && weak.standard_format !== false) {
         const dg = (x: unknown) => String(x).replace(/\D/g, ""), nk = (x: unknown) => String(x).replace(/[\s\-]/g, "");
         if (dg(ocr.plate) !== dg(weak.plate)) { ocr.needs_review = true; engNote += ` · เลขไม่ตรงกัน: Gemini ${ocr.plate} / เครื่องอ่านหลัก ${weak.plate}`; }
-        else if (nk(ocr.plate) !== nk(weak.plate)) engNote += ` · ตัวอักษรต่างจากเครื่องอ่านหลัก (${weak.plate})`;
+        else if (nk(ocr.plate) !== nk(weak.plate)) {
+          // ผู้เทียบคือ EasyOCR/YOLO (ตัวแข็ง) ตัวอักษรต่างกัน = ไม่แน่ใจจริง → ให้คนตรวจ · ถ้าเป็น Tesseract (อ่านไทยได้แย่) ถือเป็นแค่หมายเหตุ
+          if (weak.decided_by === "ai") { ocr.needs_review = true; engNote += ` · ตัวอักษรไม่ตรงกับคอมแรง: Gemini ${ocr.plate} / คอมแรง ${weak.plate}`; }
+          else engNote += ` · ตัวอักษรต่างจากเครื่องอ่านหลัก (${weak.plate})`;
+        }
       }
       // Gemini ใช้ไม่ได้ (โควตา/หมดเวลา) แต่เครื่องอ่านหลักมีผลที่พอเดาได้ → เสนอผลนั้นให้คนยืนยัน แทนที่จะทิ้งเป็น "รอตรวจทะเบียน" ว่างๆ
       if (!ocrRes.ok && weak?.plate) {
@@ -265,7 +272,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({ visit_id: visitId, force: true }),
     }).catch(() => null));
     const notified = "queued";
-    return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, engine: ocr.provider ?? (viaBackend ? "tesseract" : "gemini"), notified });
+    return json({ ok: true, plate: ocr.plate, province: ocr.province, confidence: conf, status, vehicle_id: vehicleId, engine: ocr.provider ?? (viaBackend ? "tesseract" : "gemini"), backend: viaBackend ? "ok" : (backendWhy || (tessReady ? "" : "off")), ai: backendAi, notified });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
