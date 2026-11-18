@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+import { soloVerdict, SOLO_NOTE } from "./policy.ts";
 
 // รับรูปจาก ESP32-CAM: POST image/jpeg + header x-device-key  →  OCR → บันทึก → แจ้ง Telegram
 const cors = {
@@ -223,6 +224,19 @@ Deno.serve(async (req) => {
     if (up.error) return json({ error: up.error.message }, 500);
     const drop = () => sb.storage.from("plate-images").remove([path]);
 
+    // ผลที่ "เครื่องเดียว" อ่าน (Gemini ตอนคอมแรงออฟไลน์) ให้ความมั่นใจคงที่ 0.95 ซึ่งไม่ใช่ค่าที่วัดจริง → ห้ามผ่านเกณฑ์/ลงทะเบียนรถใหม่เอง
+    // ต้องมีตัวยืนยันอิสระ (เครื่องหลักอ่านได้ตรงกัน หรือตรงรถที่ลงทะเบียนไว้เพียงคันเดียว) ไม่งั้นเก็บภาพ+ทะเบียนไว้ "รอตรวจ" และรออ่านซ้ำเมื่อคอมแรงกลับมา
+    {
+      let registeredCount = 0;
+      try {
+        const { data: rv } = await sb.from("vehicles").select("id").eq("plate_norm", String(ocr.plate).replace(/[\s\-]/g, "").toUpperCase()).limit(2);
+        registeredCount = rv?.length ?? 0;
+      } catch (_e) { /* นับไม่ได้ = ถือว่าไม่มีตัวยืนยัน (ปลอดภัยกว่า) */ }
+      const sv = soloVerdict({ provider: ocr.provider, viaBackend, plate: String(ocr.plate), weakPlate: weak?.plate, weakConf: weak?.confidence, registeredCount });
+      if (sv.solo && !sv.confirmed) { ocr.needs_review = true; engNote += SOLO_NOTE; }
+      else if (sv.solo && sv.confirmed) engNote += sv.why === "registered_exact" ? " · ตรงรถที่ลงทะเบียนไว้ (ยืนยันโดยข้อมูลรถ)" : " · เครื่องอ่านหลักอ่านตรงกัน";
+    }
+
     // 3) บันทึก
     let visitId: string | null = null, status: string, vehicleId: string | null = null;
     if (ctl.auto_save && (conf >= high || ocr.known === true || ocr.trusted === true) && !ocr.needs_review) {   // trusted = EasyOCR+YOLO ตรงกันเอง
@@ -234,7 +248,7 @@ Deno.serve(async (req) => {
         if (kv && kv.length === 1) { knownId = kv[0].id; knownProv = kv[0].province; }
       }
       const { data, error } = await sb.rpc("record_visit", {
-        p_plate: ocr.plate, p_province: knownProv, p_vehicle_type: ocr.vehicle_type, p_note: `กล้อง: ${dev.name}`,
+        p_plate: ocr.plate, p_province: knownProv, p_vehicle_type: ocr.vehicle_type, p_note: `กล้อง: ${dev.name}${engNote}`,
         p_image_path: path, p_confidence: conf, p_provider: ocr.provider ?? null, p_source: isPhone ? "phone" : "esp32",
         p_vehicle_id: knownId, p_company_id: null, p_new_company_name: null, p_register: true, p_verified: false,
       });
