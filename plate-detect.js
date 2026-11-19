@@ -133,6 +133,8 @@
     const f = glyphs(g, W, H, r); if (!f) return r;
     return { x: f.x, y: f.y, w: f.w, h: f.h, score: r.score, glyphs: f.list };
   }
-  root.DSPlate = { detect, detectFull, glyphs, sharpness };
+  /* ตัวป้ายเองชิดขอบภาพ (<3%) และไม่ใช่ป้ายใหญ่เต็มจอ = ป้ายอาจถูกขอบภาพตัด → ไม่ควรถ่าย ให้ขยับกล้อง */
+  function touchesEdge(r, W, H) { if (r.w > W * 0.8) return false; /* ถ่ายใกล้มาก ป้ายเต็มจอ = ปกติ */ return r.x < W * 0.03 || r.y < H * 0.03 || r.x + r.w > W * 0.97 || r.y + r.h > H * 0.97; }
+  root.DSPlate = { detect, detectFull, glyphs, sharpness, touchesEdge };
   if (typeof module !== "undefined") module.exports = root.DSPlate;
 })(typeof window !== "undefined" ? window : globalThis);

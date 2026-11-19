@@ -500,13 +500,9 @@ async function phoneCam() {
       while (c.children.length < list.length) { const d = document.createElement("div"); d.style.cssText = "position:absolute;border:2.5px solid #ef4444;border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.35)"; c.appendChild(d); }
       for (let k = 0; k < c.children.length; k++) { const d = c.children[k], g = list[k]; if (!g) { d.style.display = "none"; continue; } const pw = g.w * 0.28 + 3, ph = g.h * 0.18 + 3;
         d.style.display = "block"; d.style.left = ((g.x - pw) / W * 100) + "%"; d.style.top = ((g.y - ph) / H * 100) + "%"; d.style.width = ((g.w + 2 * pw) / W * 100) + "%"; d.style.height = ((g.h + 2 * ph) / H * 100) + "%"; } };
-    // r = ตำแหน่งป้ายในภาพเล็ก; คืนรูปตัดเฉพาะป้าย (เผื่อขอบ) ความละเอียดจากกล้องจริง — เล็กกว่าและชัดกว่าส่งภาพเต็ม
-    const cropBlob = (r, W, H, ratioH) => new Promise((ok) => {
-      const v = q("#pcV"), kx = v.videoWidth / W, ky = v.videoHeight / H;
-      const mx = r.w * 0.35, my = r.h * 0.8, x0 = Math.max(0, r.x - mx), y0 = Math.max(0, r.y - my), x1 = Math.min(W, r.x + r.w + mx), y1 = Math.min(H, r.y + r.h + my);
-      const sw = (x1 - x0) * kx, sh = (y1 - y0) * ky, k = Math.min(1, 1280 / sw), c = document.createElement("canvas"); c.width = Math.round(sw * k); c.height = Math.round(sh * k);
-      c.getContext("2d").drawImage(v, x0 * kx, y0 * ky, sw, sh, 0, 0, c.width, c.height); c.toBlob(ok, "image/jpeg", 0.9);
-    });
+    // ส่งทั้งเฟรมเสมอ (ไม่ตัดเฉพาะป้ายแล้ว): ทดสอบกับรูปจริง 28 รูป ตัดเฉพาะป้ายแล้วอ่านเลขถูก 6/28 (แถวเลขท้ายของป้ายหลายแถวหลุดจากกรอบ) · ตัดเผื่อมากขึ้น 15/28 · ทั้งภาพ 19/28
+    // และกล้องส่งมาแค่ ~1280px อยู่แล้ว การตัดจึงไม่ได้เพิ่มความละเอียด · ฝั่งเซิร์ฟเวอร์/คอมแรงหาป้ายในภาพเองได้
+    const fullBlob = () => new Promise((ok) => { const c = grab(1600); if (!c) return ok(null); c.toBlob(ok, "image/jpeg", 0.88); });
     const send = async (blob, auto) => {
       const { data: { session } } = await db.auth.getSession();
       const r = await fetch(CAM_URL + "?name=" + encodeURIComponent(name) + (auto ? "&auto=1" : ""), { method: "POST", headers: { Authorization: "Bearer " + session.access_token, apikey: window.DS_CONFIG.SUPABASE_KEY, "Content-Type": "image/jpeg" }, body: blob });
@@ -608,8 +604,8 @@ async function phoneCam() {
       grabbing = true; say("รถนิ่งแล้ว — กำลังถ่ายและเลือกเฟรมที่คมที่สุด…");
       let bestS = -1, best = null;
       for (let n = 0; n < 3; n++) {
-        const f = grayOf(v), rr = window.DSPlate.detectFull(f.g, f.W, f.H), sh = window.DSPlate.sharpness(f.g, f.W, f.H, Math.floor(f.W * 0.15), Math.floor(f.H * 0.15), Math.floor(f.W * 0.7), Math.floor(f.H * 0.7));
-        if (sh > bestS) { bestS = sh; best = rr ? await cropBlob(rr, f.W, f.H) : await new Promise((ok) => { const c = grab(1600); if (!c) return ok(null); c.toBlob(ok, "image/jpeg", 0.88); }); }
+        const f = grayOf(v), rr = window.DSPlate.detectFull(f.g, f.W, f.H), sh = rr ? window.DSPlate.sharpness(f.g, f.W, f.H, rr.x, rr.y, rr.w, rr.h) : window.DSPlate.sharpness(f.g, f.W, f.H, Math.floor(f.W * 0.15), Math.floor(f.H * 0.15), Math.floor(f.W * 0.7), Math.floor(f.H * 0.7));
+        if (sh > bestS) { bestS = sh; best = await fullBlob(); }
         await new Promise((ok) => setTimeout(ok, 150));
       }
       grabbing = false; armed = false; stable = 0; last = null;
@@ -649,16 +645,18 @@ async function phoneCam() {
         else { say("อ่านคันนี้ไปแล้ว — รอรถคันต่อไป"); return; }
       }
       if (!big) { stable = 0; last = null; say("พบป้ายคล้ายทะเบียน — ยังไกลอยู่ รอให้เข้ามาใกล้อีก"); return; }
+      if (window.DSPlate.touchesEdge(r, W, H)) { stable = 0; last = null; say("ป้ายชิดขอบภาพ — ขยับกล้องให้เห็นป้ายทั้งแผ่นอยู่กลางภาพ"); return; }
+      const sure = !!(r.glyphs && r.glyphs.length >= 3);   // เห็นตัวอักษรเรียงแถวชัด = ล็อกมั่นใจ · เห็นแค่กรอบ (อาจเป็นแถบอื่น เช่น บรรทัดจังหวัด/ป้ายโฆษณา) ต้องนิ่งนานกว่าถึงจะถ่าย
       const mv = last ? Math.hypot(r.x + r.w / 2 - last.x - last.w / 2, r.y + r.h / 2 - last.y - last.h / 2) / W : 1, gr = last ? Math.abs(r.w - last.w) / last.w : 1;
       last = r; stable = (mv < 0.03 && gr < 0.15) ? stable + 1 : 0;
-      if (stable < 2) { say("ป้ายเข้ากรอบแล้ว รอให้นิ่ง…"); return; }
+      if (stable < (sure ? 2 : 5)) { say(sure ? "ป้ายเข้ากรอบแล้ว รอให้นิ่ง…" : "เห็นกรอบแต่ตัวอักษรยังไม่ชัด — ถือให้นิ่งหรือขยับเข้าใกล้อีกนิด"); return; }
       if (Date.now() - lastOcr < 4000) { say("รอสักครู่… (กันอ่านถี่เกินไป)"); return; }
       // นิ่งแล้ว: เก็บ 3 เฟรมห่างกัน ~150 ms เลือกเฟรมที่คมที่สุด (หลบเฟรมเบลอ) ก่อนส่งให้ AI 1 ครั้ง
       grabbing = true; say("ป้ายนิ่งแล้ว กำลังเลือกเฟรมที่คมที่สุด…");
       let bestS = -1, bestR = r, bestBlob = null;
       for (let n = 0; n < 3; n++) {
         const f = grayOf(v), rr = window.DSPlate.detectFull(f.g, f.W, f.H) || r, sh = window.DSPlate.sharpness(f.g, f.W, f.H, rr.x, rr.y, rr.w, rr.h);
-        if (sh > bestS) { bestS = sh; bestR = rr; bestBlob = await cropBlob(rr, f.W, f.H); }
+        if (sh > bestS) { bestS = sh; bestR = rr; bestBlob = await fullBlob(); }
         await new Promise((ok) => setTimeout(ok, 150));
       }
       grabbing = false; armed = false; stable = 0; last = null;
