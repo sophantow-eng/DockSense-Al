@@ -293,7 +293,7 @@ const blobToDataUrl = (b) => new Promise((ok) => { const r = new FileReader(); r
 
 function liveView(startId) {
   const m = DS.modal("📺 ภาพสด", `<div class="seg" id="lvKind"><button type="button" data-k="esp">📷 ESP32-CAM</button><button type="button" data-k="phone">📱 กล้องมือถือ</button></div><div class="camtabs" id="lvTabs" style="margin-top:8px"></div>
-    <div class="camwrap"><img id="lvImg" alt="ภาพสด"><div class="camload" id="lvWait">กำลังหากล้อง…</div></div>
+    <div class="camwrap"><img id="lvImg" alt="ภาพสด"><div id="lvBox" aria-hidden="true"></div><div class="camload" id="lvWait">กำลังหากล้อง…</div></div>
     <p class="muted" id="lvInfo" style="margin:8px 0 0"></p>
     <div class="row" style="margin-top:10px">${DS.can(me, "write") ? '<button id="lvSnap" type="button" disabled>📸 ถ่ายทะเบียน</button>' : ""}<button class="ghost" id="lvFs" type="button">เต็มจอ</button><button class="ghost" id="lvX" type="button">ปิด</button></div>
     <a id="lvLan" class="muted hide" target="_blank" rel="noopener" style="display:block;margin-top:8px"></a>`);
@@ -323,7 +323,7 @@ function liveView(startId) {
     const info = q("#lvInfo"); if (!info || !cur) return;
     const gap = lastAt ? (Date.now() - lastAt) / 1000 : null;
     if (gap == null) info.textContent = cur.kind === "esp" ? "รอภาพจากกล้อง (ปกติเริ่มใน 1–3 วินาที)…" : "รอภาพจากมือถือ…";
-    else if (gap > 5) info.textContent = "ไม่มีสัญญาณภาพ — กล้องอาจหลุดหรือปิดอยู่";
+    else if (gap > 5) { info.textContent = "ไม่มีสัญญาณภาพ — กล้องอาจหลุดหรือปิดอยู่"; lock = {}; drawLock(null); }
     else info.textContent = `ภาพสด ${(frames / Math.max(1, (Date.now() - t0) / 1000)).toFixed(1)} เฟรม/วินาที`;
     if (Date.now() - t0 > 4000) { frames = 0; t0 = Date.now(); }
     // สำรอง: กล้อง ESP32 ไม่มีภาพสดเข้ามา > 6 วินาที → ดึงภาพนิ่งล่าสุดที่เซิร์ฟเวอร์เก็บไว้
@@ -332,6 +332,25 @@ function liveView(startId) {
       db.storage.from("plate-images").createSignedUrl(`camera/${id0}/latest.jpg`, 60).then(({ data }) => { if (data && cur && cur.id === id0 && (!lastAt || Date.now() - lastAt > 6000)) { const im = q("#lvImg"); if (im) { im.src = data.signedUrl + "&t=" + Date.now(); const w = q("#lvWait"); if (w) w.style.display = "none"; } } });
     }
   }, 1000);
+  // ---- กรอบแดงล็อกทะเบียนบนภาพสด: วิเคราะห์ในเบราว์เซอร์ของผู้ดู (ESP32 ไม่มีแรงพอ) ไม่ใช้ AI ไม่เสียโควตา ----
+  // เบา: ลดภาพเหลือ 400px · วิเคราะห์ไม่เกินราว 3 ครั้ง/วินาที · ข้ามตอนแท็บถูกซ่อน · ข้ามถ้าเฟรมก่อนหน้ายังวิเคราะห์ไม่เสร็จ
+  let lock = {}, lockAt = 0;
+  const drawLock = (box) => {
+    const el = q("#lvBox"), im = q("#lvImg"); if (!el || !im) return;
+    if (!box || !im.offsetWidth) { el.style.display = "none"; return; }
+    const px = box.w * 0.06, py = box.h * 0.12;                       // เผื่อขอบนิดหน่อยให้กรอบไม่แนบตัวอักษรเกินไป
+    el.style.display = "block";
+    el.style.left = (im.offsetLeft + (box.x - px) * im.offsetWidth) + "px";
+    el.style.top = (im.offsetTop + (box.y - py) * im.offsetHeight) + "px";
+    el.style.width = ((box.w + 2 * px) * im.offsetWidth) + "px";
+    el.style.height = ((box.h + 2 * py) * im.offsetHeight) + "px";
+  };
+  const lvImgEl = q("#lvImg");
+  if (lvImgEl) lvImgEl.onload = () => {
+    if (!window.DSPlate || !window.DSPlate.lockFromImage || document.hidden) return;
+    const now = Date.now(); if (now - lockAt < 330) return; lockAt = now;
+    drawLock(window.DSPlate.lockFromImage(lvImgEl, lock, now));
+  };
   const onFrame = (b) => {
     lastFrame = b; lastAt = Date.now(); frames++;
     const i = q("#lvImg"); if (!i) return; i.src = b64url(b);
@@ -339,7 +358,7 @@ function liveView(startId) {
   };
   async function select(id) {
     const c = camList().find((x) => x.id === id); if (!c) return;
-    cur = c; kind = c.kind; lastFrame = null; lastAt = 0; frames = 0; t0 = Date.now(); clearInterval(watchT);
+    cur = c; kind = c.kind; lastFrame = null; lastAt = 0; frames = 0; t0 = Date.now(); clearInterval(watchT); lock = {}; drawLock(null);
     if (ch) { db.removeChannel(ch); ch = null; }
     const w = q("#lvWait"), i = q("#lvImg"); if (i) i.removeAttribute("src"); if (w) { w.style.display = ""; w.innerHTML = '<span class="spin"></span> กำลังเชื่อมต่อกล้อง…'; }
     const s = q("#lvSnap"); if (s) s.disabled = true; tabs();

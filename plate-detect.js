@@ -135,6 +135,29 @@
   }
   /* ตัวป้ายเองชิดขอบภาพ (<3%) และไม่ใช่ป้ายใหญ่เต็มจอ = ป้ายอาจถูกขอบภาพตัด → ไม่ควรถ่าย ให้ขยับกล้อง */
   function touchesEdge(r, W, H) { if (r.w > W * 0.8) return false; /* ถ่ายใกล้มาก ป้ายเต็มจอ = ปกติ */ return r.x < W * 0.03 || r.y < H * 0.03 || r.x + r.w > W * 0.97 || r.y + r.h > H * 0.97; }
-  root.DSPlate = { detect, detectFull, glyphs, sharpness, touchesEdge };
+  /* lockFromImage(img, st, now) — ล็อกป้ายบน "ภาพสด" ในหน้าเว็บ (ไม่ใช้ AI ไม่เสียโควตา)
+     คืนกล่อง {x,y,w,h} สัดส่วน 0..1 ของภาพ เมื่อ "ล็อกมั่นใจ" = เจอตัวอักษร/ตัวเลขเรียงแถวเดียวกัน ≥3 ตัว · ไม่เจอ = ค้างกรอบเดิมไว้ ≤0.9 วินาที แล้วคืน null
+     st = สถานะต่อเนื่อง ({} เริ่มต้น) · เกลี่ยกรอบไม่ให้กระโดด · ลดภาพเหลือกว้าง 400px ก่อนวิเคราะห์ (เบา) · ภาพข้ามโดเมนอ่านพิกเซลไม่ได้ = ข้าม */
+  function lockFromImage(img, st, now) {
+    now = now || Date.now();
+    try {
+      if (img && img.naturalWidth) {
+        const W = 400, H = Math.max(1, Math.round(img.naturalHeight * W / img.naturalWidth));
+        const cv = st.cv || (st.cv = document.createElement("canvas")); cv.width = W; cv.height = H;
+        const cx = cv.getContext("2d", { willReadFrequently: true }); cx.drawImage(img, 0, 0, W, H);
+        const px = cx.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+        for (let k = 0, j = 0; k < g.length; k++, j += 4) g[k] = (px[j] * 77 + px[j + 1] * 150 + px[j + 2] * 29) >> 8;
+        const r = detectFull(g, W, H);
+        if (r && r.glyphs && r.glyphs.length >= 3 && r.w > W * 0.08) {
+          const n = { x: r.x / W, y: r.y / H, w: r.w / W, h: r.h / H }, o = st.box;
+          st.box = o && Math.abs(o.x - n.x) < 0.2 && Math.abs(o.y - n.y) < 0.2 ? { x: (o.x + n.x) / 2, y: (o.y + n.y) / 2, w: (o.w + n.w) / 2, h: (o.h + n.h) / 2 } : n;
+          st.seen = now;
+        }
+      }
+    } catch (_e) { /* canvas ถูกจำกัด (ภาพจากโดเมนอื่น) — ข้าม */ }
+    if (st.box && now - (st.seen || 0) > 900) st.box = null;
+    return st.box || null;
+  }
+  root.DSPlate = { detect, detectFull, glyphs, sharpness, touchesEdge, lockFromImage };
   if (typeof module !== "undefined") module.exports = root.DSPlate;
 })(typeof window !== "undefined" ? window : globalThis);

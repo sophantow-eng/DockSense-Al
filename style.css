@@ -326,3 +326,7 @@ button,.btn,.badge{white-space:nowrap}
 .rank .cnt small{display:block;font-size:11px;font-weight:400;color:var(--muted)}
 .hb{padding:7px 0}.hb .track{height:8px;border-radius:99px;background:var(--line);margin-top:5px;overflow:hidden}
 .hb .track i{display:block;height:100%;border-radius:99px;background:var(--brand)}
+
+/* กรอบแดงล็อกทะเบียนบนภาพสด (หน้า "ดูภาพสด") */
+#lvBox{position:absolute;display:none;pointer-events:none;border:3px solid #ef4444;border-radius:6px;box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 14px rgba(239,68,68,.6);transition:left .12s linear,top .12s linear,width .12s linear,height .12s linear;z-index:2}
+#lvBox::after{content:"ทะเบียน";position:absolute;left:0;top:0;background:#ef4444;color:#fff;font:700 12px/1 system-ui,sans-serif;padding:3px 6px;border-radius:0 0 6px 0}
